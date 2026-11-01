@@ -1,0 +1,27 @@
+# HackerTune worker: içe aktarma, kanal tarama, embedding, agent iş kuyruğu. Port bağlamaz.
+# Agent modunda bp, tmux soketine erişmeli: bu yüzden PrivateTmp yok ve ProtectSystem=full.
+[Unit]
+Description=HackerTune worker
+After=network-online.target yt-web.service
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/srv/youtube
+Environment=FASTEMBED_CACHE_PATH=/srv/youtube/var/models
+Environment=HF_HUB_OFFLINE=1
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/srv/youtube/yt.env
+ExecStart=/srv/youtube/.venv/bin/python -m app.worker
+Restart=always
+RestartSec=10
+MemoryMax=2G
+Nice=5
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target

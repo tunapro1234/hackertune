@@ -1,0 +1,6 @@
+#!/bin/sh
+# Değerlendirme agent'larının tek aracı (app/ytctl.py). Depo kökü bu betiğin konumundan bulunur.
+ROOT=$(cd "$(dirname "$0")/.." && pwd) || exit 1
+cd "$ROOT" || exit 1
+export PYTHONPATH="$ROOT" FASTEMBED_CACHE_PATH="$ROOT/var/models" HF_HUB_OFFLINE=1
+exec "$ROOT/.venv/bin/python" -m app.ytctl "$@"

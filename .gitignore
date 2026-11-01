@@ -1,0 +1,16 @@
+# çalışma zamanı verisi ve sırlar
+.venv/
+var/
+data/
+yt.env
+*.db
+*.db-*
+__pycache__/
+*.pyc
+# sunucuya özel notlar ve Claude Code durum dosyaları
+HANDOFF.md
+/.claude/
+agents/*/.claude/*
+!agents/*/.claude/settings.local.json
+node_modules/
+tools/

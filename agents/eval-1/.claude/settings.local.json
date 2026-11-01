@@ -1,0 +1,10 @@
+{
+  "model": "claude-opus-5-5",
+  "effortLevel": "medium",
+  "autoCompactWindow": 120000,
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "*", "hooks": [ { "type": "command", "command": "/srv/youtube/bin/agent-guard.py" } ] }
+    ]
+  }
+}

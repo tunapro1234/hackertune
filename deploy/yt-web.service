@@ -1,0 +1,27 @@
+# HackerTune web (FastAPI). Örnek birim: yolları ve User= değerini kendi kurulumuna göre düzenle.
+# Sohbet, çalıştığı kullanıcının Claude Code girişini (claude -p) kullanır; ReadWritePaths o kullanıcının HOME'unu içermeli.
+[Unit]
+Description=HackerTune web
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/srv/youtube
+Environment=FASTEMBED_CACHE_PATH=/srv/youtube/var/models
+Environment=HF_HUB_OFFLINE=1
+EnvironmentFile=-/srv/youtube/yt.env
+ExecStart=/srv/youtube/.venv/bin/python -m uvicorn app.web:app --host 127.0.0.1 --port 3030 --proxy-headers --forwarded-allow-ips 127.0.0.1 --no-access-log
+Restart=always
+RestartSec=3
+MemoryMax=1500M
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/srv/youtube/var /root
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target
