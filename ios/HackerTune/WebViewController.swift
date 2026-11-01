@@ -9,13 +9,9 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     private let errorView = ErrorView()
     private var failedURL: URL?
 
-    /// Matches the site's <meta name="theme-color"> (#ffffff light, #0f0f0f dark), so the
-    /// status-bar strip and the area behind the page blend in.
-    private static let pageBackground = UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0x0f / 255, green: 0x0f / 255, blue: 0x0f / 255, alpha: 1)
-            : .white
-    }
+    /// Brand background (#ffffff light, #0d0d10 dark; asset "LaunchBackground", also used by the
+    /// launch screen), so the status-bar strip and the area behind the page blend in.
+    private static let pageBackground = UIColor(named: "LaunchBackground") ?? .systemBackground
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -255,7 +251,7 @@ final class ErrorView: UIView {
 
         var config = UIButton.Configuration.filled()
         config.title = "Tekrar dene"
-        config.baseBackgroundColor = UIColor(red: 1, green: 106 / 255, blue: 0, alpha: 1)
+        config.baseBackgroundColor = UIColor(red: 0x0f / 255, green: 0x76 / 255, blue: 0x6e / 255, alpha: 1)  // brand teal #0f766e
         config.baseForegroundColor = .white
         config.cornerStyle = .capsule
         button.configuration = config
