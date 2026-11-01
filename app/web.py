@@ -1,4 +1,4 @@
-"""yt.tunapro.xyz web sunucusu (FastAPI). 127.0.0.1:3030, önünde nginx."""
+"""HackerTune web sunucusu (FastAPI). 127.0.0.1:3030, önünde nginx."""
 import asyncio
 import hashlib
 import json
@@ -10,11 +10,11 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles
 
 import re
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 import httpx
 
-from . import agents, chat, config, db, llm, reco, tools, yt
+from . import agents, chat, config, db, llm, reco, showcase, tools, yt
 from .pipeline import get_profile
 
 db.init()
@@ -30,6 +30,12 @@ def _uid_of(tok):
 @app.middleware("http")
 async def identity(request: Request, call_next):
     tok = request.cookies.get(config.COOKIE)
+    host = (request.headers.get("host") or "").split(":")[0].lower()
+    if host in config.OLD_HOSTS:
+        path = request.url.path + (("?" + request.url.query) if request.url.query else "")
+        if request.method == "GET" and tok and 20 <= len(tok) <= 100 and not path.startswith("/api/"):
+            return RedirectResponse(f"{PUBLIC}/s/{tok}?next={quote(path, safe='')}", status_code=302)
+        return RedirectResponse(PUBLIC + path, status_code=301 if request.method == "GET" else 308)
     new = False
     if not tok or len(tok) < 20 or len(tok) > 100:
         tok, new = secrets.token_urlsafe(24), True
@@ -60,6 +66,14 @@ INDEX = config.STATIC / "index.html"
 
 
 @app.get("/")
+@app.get("/showcase")
+@app.get("/subscriptions")
+@app.get("/algorithm")
+@app.get("/library")
+@app.get("/about")
+@app.get("/history")
+@app.get("/topics")
+@app.get("/search")
 @app.get("/abonelikler")
 @app.get("/algoritma")
 @app.get("/liste")
@@ -73,10 +87,12 @@ async def spa(request: Request, vid: str = None):
 
 
 @app.get("/s/{tok}")
-async def sync_link(tok: str):
+async def sync_link(tok: str, next: str = "/"):
     if not (20 <= len(tok) <= 100):
         raise HTTPException(400)
-    r = RedirectResponse("/", status_code=303)
+    if not next.startswith("/") or next.startswith("//") or "\\" in next:
+        next = "/"
+    r = RedirectResponse(next, status_code=303)
     r.set_cookie(config.COOKIE, tok, max_age=2 * 365 * 86400, httponly=True, samesite="lax", secure=True)
     return r
 
@@ -133,7 +149,7 @@ async def video(request: Request, vid: str):
     con, uid = con_user(request)
     r = con.execute("SELECT * FROM videos WHERE vid=?", (vid,)).fetchone()
     if not r:
-        raise HTTPException(404, "Bu video katalogda yok")
+        raise HTTPException(404, "This video is not in the catalog")
     ments = [dict(m) for m in con.execute(
         """SELECT hn_comment_id, author, month, story_title, stance, why, quote, text FROM mentions WHERE vid=?
            ORDER BY CASE stance WHEN 'strong_rec' THEN 0 WHEN 'rec' THEN 1 WHEN 'critical' THEN 2 ELSE 3 END, month DESC""",
@@ -180,15 +196,30 @@ async def lists(request: Request, kind: str):
          "hidden": "(x.hidden=1 OR x.rating<0) ORDER BY x.rated_at DESC"}.get(kind)
     if not q:
         raise HTTPException(404)
-    ix = reco.index()
+    rows = con.execute(f"SELECT x.vid, x.pos, x.dur, x.seen_at, x.watched_at, x.watch_s FROM user_video x "
+                       f"WHERE x.uid=? AND {q} LIMIT 300", (uid,)).fetchall()
+    metas = showcase._metas(con, [r["vid"] for r in rows])  # indeks dışı videolar (vitrin seçkileri) dahil
     out = []
-    for r in con.execute(f"SELECT x.vid, x.pos, x.dur, x.seen_at, x.watched_at, x.watch_s FROM user_video x "
-                         f"WHERE x.uid=? AND {q} LIMIT 300", (uid,)):
-        if r["vid"] in ix.row:
-            c = reco.card_out(ix.metas[ix.row[r["vid"]]])
+    for r in rows:
+        if r["vid"] in metas:
+            c = reco.card_out(metas[r["vid"]])
             c.update({"pos": r["pos"], "dur": r["dur"], "seen_at": r["seen_at"] or r["watched_at"], "watch_s": r["watch_s"]})
             out.append(c)
     return {"items": out}
+
+
+# ---------------- vitrin (küratör agent'ının rafları) ----------------
+
+@app.get("/api/showcase")
+async def showcase_get(request: Request):
+    con, uid = con_user(request)
+    return await asyncio.to_thread(showcase.get, con, uid)
+
+
+@app.post("/api/showcase/refresh")
+async def showcase_refresh(request: Request):
+    con, uid = con_user(request)
+    return showcase.refresh(con, uid)
 
 
 @app.delete("/api/history/{vid}")
@@ -260,10 +291,10 @@ async def _audio_src(vid, fmt, fresh=False):
             out, err = await asyncio.wait_for(proc.communicate(), 60)
         except asyncio.TimeoutError:
             proc.kill()
-            raise HTTPException(504, "YouTube ses adresi zaman aşımı")
+            raise HTTPException(504, "Timed out getting the YouTube audio URL")
         url = out.decode().strip().splitlines()[0] if out.strip() else ""
         if not url.startswith("http"):
-            raise HTTPException(502, "Ses akışı alınamadı: " + err.decode()[-200:])
+            raise HTTPException(502, "Could not get the audio stream: " + err.decode()[-200:])
         q = parse_qs(urlparse(url).query)
         clen = int(q["clen"][0]) if "clen" in q else None
         if not clen:
@@ -284,7 +315,7 @@ async def audio(request: Request, vid: str, fmt: str):
         raise HTTPException(404)
     con = db.connect()
     if not con.execute("SELECT 1 FROM videos WHERE vid=?", (vid,)).fetchone():
-        raise HTTPException(404, "Bu video katalogda yok")
+        raise HTTPException(404, "This video is not in the catalog")
     src = await _audio_src(vid, fmt)
     total = src["clen"]
     start, end = 0, total - 1
@@ -332,13 +363,13 @@ async def do_import(request: Request):
     b = await request.json()
     text = str(b.get("text") or "")
     if len(text) > 3_000_000:
-        raise HTTPException(413, "dosya çok büyük")
+        raise HTTPException(413, "file too large")
     items = yt.parse_import(text, str(b.get("filename") or ""))
     if not items:
-        return JSONResponse({"error": "Listede kanal bulamadım. Takeout subscriptions.csv, OPML ya da kanal "
-                                      "linkleri/@kullanıcıadları yapıştır."}, status_code=400)
+        return JSONResponse({"error": "No channels found in that list. Paste a Takeout subscriptions.csv, an OPML "
+                                      "file, or channel links / @handles."}, status_code=400)
     if con.execute("SELECT 1 FROM imports WHERE uid=? AND status IN ('pending','running')", (uid,)).fetchone():
-        return JSONResponse({"error": "Önceki içe aktarman hâlâ sürüyor."}, status_code=409)
+        return JSONResponse({"error": "Your previous import is still running."}, status_code=409)
     have = {r["channel_id"] for r in con.execute("SELECT channel_id FROM user_channels WHERE uid=?", (uid,))}
     items = [i for i in items if i["ref"] not in have][: config.MAX_CHANNELS_PER_USER]
     cur = con.execute("INSERT INTO imports(uid,created_at,status,total,done,log,items) VALUES(?,?,?,?,0,'[]',?)",
@@ -427,7 +458,7 @@ async def profile_get(request: Request):
 async def profile_put(request: Request):
     con, uid = con_user(request)
     try:
-        ch = chat.apply_profile(con, uid, await request.json(), "elle")
+        ch = chat.apply_profile(con, uid, await request.json(), "manual")
     except ValueError as e:
         raise HTTPException(400, str(e))
     return {"changes": ch or []}
@@ -470,7 +501,7 @@ async def chat_post(request: Request):
     con.execute("INSERT INTO messages(chat_id,role,content,created_at) VALUES(?,?,?,?)", (cid, "user", text, time.time()))
 
     async def gen():
-        yield sse({"t": "status", "x": "Bağlam hazırlanıyor…"})
+        yield sse({"t": "status", "x": "Preparing context…"})
         if kind == "video":
             ctx = await chat.video_context(con, vid)
             system = chat.VIDEO_SYSTEM
@@ -492,16 +523,16 @@ async def chat_post(request: Request):
                 else:
                     full, usd = x["text"], x["usd"]
         except Exception as e:
-            yield sse({"t": "error", "x": f"Model yanıt veremedi: {str(e)[:200]}"})
+            yield sse({"t": "error", "x": f"The model could not answer: {str(e)[:200]}"})
             return
         changes = None
         m = chat.TAG_RE.search(full)
         visible = chat.TAG_RE.sub("", full).strip()
         if m:
             try:
-                changes = chat.apply_profile(con, uid, json.loads(m.group(1)), "sohbet" if kind == "steer" else "video sohbeti")
+                changes = chat.apply_profile(con, uid, json.loads(m.group(1)), "chat" if kind == "steer" else "video chat")
             except Exception as e:
-                changes = [f"(profil güncellenemedi: {e})"]
+                changes = [f"(profile could not be updated: {e})"]
         meta = {"usd": round(usd, 4), "profile_changes": changes}
         con.execute("INSERT INTO messages(chat_id,role,content,meta,created_at) VALUES(?,?,?,?,?)",
                     (cid, "assistant", visible, json.dumps(meta, ensure_ascii=False), time.time()))

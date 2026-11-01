@@ -54,7 +54,7 @@ def main():
                         need.add("transcript")
                     missing = sorted(need - CALLED)
                     if missing:
-                        res = {"ok": False, "errors": [f"Önce şu araçları çağır: {', '.join(missing)}"]}
+                        res = {"ok": False, "errors": [f"Call these tools first: {', '.join(missing)}"]}
                         log(name, args, res)
                         send({"jsonrpc": "2.0", "id": mid, "result": {
                             "content": [{"type": "text", "text": json.dumps(res, ensure_ascii=False)}], "isError": True}})

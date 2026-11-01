@@ -77,7 +77,7 @@ CREATE INDEX IF NOT EXISTS events_vid ON events(vid);
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS jobs (           -- bp ile açılan Claude Code agent'larına verilen işler
   id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, payload TEXT, agent TEXT,
-  status TEXT,                       -- sent|done|failed
+  status TEXT,                       -- queued|sent|done|failed (queued: curate işi, agent henüz almadı)
   calls TEXT, note TEXT, channel TEXT,
   created_at REAL, sent_at REAL, done_at REAL
 );
@@ -87,6 +87,11 @@ CREATE TABLE IF NOT EXISTS watch (           -- izleme geçmişi (her açılış
   started_at REAL, updated_at REAL, pos REAL, dur REAL, seconds REAL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS watch_uid ON watch(uid, updated_at);
+CREATE TABLE IF NOT EXISTS showcase (        -- vitrin: küratör agent'ının kullanıcı başına rafları (her üretim yeni satır)
+  id INTEGER PRIMARY KEY AUTOINCREMENT, uid TEXT,   -- uid '_default' = sinyali olmayan ziyaretçilerin ortak vitrini
+  generated_at REAL, profile_version INTEGER, shelves TEXT, status TEXT, job_id INTEGER
+);
+CREATE INDEX IF NOT EXISTS showcase_uid ON showcase(uid, id);
 """
 
 
@@ -116,6 +121,9 @@ def init():
     for c, t in (("hidden_s", "REAL DEFAULT 0"), ("ua", "TEXT")):  # ekran kapalı/arka planda çalan saniye; cihaz
         if c not in wcols:
             con.execute(f"ALTER TABLE watch ADD COLUMN {c} {t}")
+    jcols = {r["name"] for r in con.execute("PRAGMA table_info(jobs)")}
+    if "scratch" not in jcols:  # iş başına geçici veri (küratörün katalog dışında gördüğü videolar)
+        con.execute("ALTER TABLE jobs ADD COLUMN scratch TEXT")
     con.close()
     _inited = True
 

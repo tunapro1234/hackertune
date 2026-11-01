@@ -47,7 +47,7 @@ def tool_transcript(vid, offset=0, max_chars=30000):
     max_chars = max(2000, min(int(max_chars or 30000), 60000))
     full = yt.transcript_text(vid)
     if not full:
-        return {"available": False, "text": "", "note": "Bu videoda altyazı/transcript yok. Meta ve açıklamayla değerlendir."}
+        return {"available": False, "text": "", "note": "This video has no captions/transcript. Judge it from the metadata and description."}
     offset = max(0, int(offset or 0))
     chunk = full[offset:offset + max_chars]
     nxt = offset + len(chunk)
@@ -58,7 +58,7 @@ def tool_transcript(vid, offset=0, max_chars=30000):
 def tool_hn(vid, query=None):
     hits = yt.hn_search(query or vid)
     return {"query": query or vid, "hits": hits,
-            "note": "Yalnızca videonun linkinin geçtiği HN gönderi/yorumları (Algolia)." if not query else "Serbest sorgu sonuçları."}
+            "note": "Only HN posts/comments that link this video (Algolia)." if not query else "Free-text query results."}
 
 
 def tool_similar(vid, text=None, k=8):
@@ -82,7 +82,7 @@ def tool_similar(vid, text=None, k=8):
                     "recommenders": hn.get("recommenders"), "years": f"{hn.get('first_year')}-{hn.get('last_year')}",
                     "content_type": card.get("content_type"), "summary": card.get("summary"), "why_hn": card.get("why")})
     return {"query_text": text[:300], "neighbors": out,
-            "note": "HackerTube videoları: HN'de ≥3 kişi, ≥3 ayrı ayda linklemiş. quality_equiv = skorun 0-10 karşılığı."}
+            "note": "HackerTube videos: linked on HN by >=3 people in >=3 different months. quality_equiv = the score mapped to 0-10."}
 
 
 def tool_channel(vid):
@@ -107,23 +107,23 @@ def tool_submit(vid, card, model=None):
            "verdict", "reasoning"]
     for k in req:
         if k not in card or card[k] in (None, "", []):
-            errs.append(f"'{k}' eksik")
+            errs.append(f"'{k}' is missing")
     if errs:
         return {"ok": False, "errors": errs}
     try:
         q = float(card["quality"])
         assert 0 <= q <= 10
     except Exception:
-        return {"ok": False, "errors": ["quality 0-10 arası sayı olmalı"]}
+        return {"ok": False, "errors": ["quality must be a number between 0 and 10"]}
     if card["content_type"] not in CONTENT_TYPES:
-        errs.append(f"content_type şunlardan biri olmalı: {CONTENT_TYPES}")
+        errs.append(f"content_type must be one of: {CONTENT_TYPES}")
     if card["level"] not in LEVELS:
-        errs.append(f"level şunlardan biri olmalı: {LEVELS}")
+        errs.append(f"level must be one of: {LEVELS}")
     if card["shelf_life"] not in SHELF:
-        errs.append(f"shelf_life şunlardan biri olmalı: {SHELF}")
+        errs.append(f"shelf_life must be one of: {SHELF}")
     bad = [c for c in card["categories"] if c not in cats]
     if bad:
-        errs.append(f"bilinmeyen kategori id: {bad}")
+        errs.append(f"unknown category id: {bad}")
     if errs:
         return {"ok": False, "errors": errs}
     hl = []
@@ -144,32 +144,32 @@ def tool_submit(vid, card, model=None):
     with db.tx(con):
         r = con.execute("SELECT 1 FROM videos WHERE vid=?", (vid,)).fetchone()
         if not r:
-            return {"ok": False, "errors": ["video DB'de yok"]}
+            return {"ok": False, "errors": ["video is not in the DB"]}
         m = yt.video_meta(vid)
         con.execute("""UPDATE videos SET card=?, quality=?, eval=?, upload_date=COALESCE(?,upload_date),
                        duration=COALESCE(?,duration), views=COALESCE(?,views), lang=COALESCE(?,lang), updated_at=?
                        WHERE vid=?""",
                     (json.dumps(stored, ensure_ascii=False), round(q, 1), json.dumps(ev, ensure_ascii=False),
                      m.get("upload_date"), m.get("duration"), m.get("views"), m.get("language"), time.time(), vid))
-    return {"ok": True, "message": "Kaydedildi. İşin bitti; kısa bir onay cümlesiyle bitir."}
+    return {"ok": True, "message": "Saved. You are done; finish with one short confirmation sentence."}
 
 
 TOOLS = {
-    "meta": (tool_meta, "Videonun YouTube metadata'sı: başlık, kanal, süre, yayın tarihi, izlenme/beğeni, dil, açıklama, "
-                        "etiketler, bölümler ve transcript'in var olup olmadığı/uzunluğu.", {}),
-    "transcript": (tool_transcript, "Transcript'i zaman damgalı metin olarak parça parça okur. Uzun videolarda "
-                                    "next_offset ile devam et.",
-                   {"offset": {"type": "integer", "description": "karakter ofseti (0'dan başla)"},
-                    "max_chars": {"type": "integer", "description": "parça boyu, en fazla 60000"}}),
-    "hn": (tool_hn, "Hacker News'te (Algolia) bu videonun linklendiği gönderi ve yorumlar. İstersen serbest 'query' ile "
-                    "konuyu da arayabilirsin.", {"query": {"type": "string"}}),
-    "similar": (tool_similar, "HackerTube'daki (HN'nin yıllardır önerdiği videolar) en benzer videolar ve skorları: "
-                              "kalibrasyon için. 'text' verilmezse başlık+açıklama kullanılır.",
+    "meta": (tool_meta, "The video's YouTube metadata: title, channel, length, upload date, views/likes, language, "
+                        "description, tags, chapters and whether a transcript exists (and its length).", {}),
+    "transcript": (tool_transcript, "Reads the transcript as timestamped text, chunk by chunk. For long videos "
+                                    "continue with next_offset.",
+                   {"offset": {"type": "integer", "description": "character offset (start at 0)"},
+                    "max_chars": {"type": "integer", "description": "chunk size, at most 60000"}}),
+    "hn": (tool_hn, "Hacker News posts and comments (Algolia) that link this video. Optionally search the topic with a free "
+                    "'query'.", {"query": {"type": "string"}}),
+    "similar": (tool_similar, "The most similar HackerTube videos (what HN has recommended for years) and their scores, "
+                              "for calibration. Without 'text' the title+description is used.",
                 {"text": {"type": "string"}, "k": {"type": "integer"}}),
-    "channel": (tool_channel, "Kanalın HackerTube'daki geçmişi (kaç video, ortalama skor) ve bu sistemin aynı kanaldaki "
-                              "önceki değerlendirmeleri.", {}),
-    "submit": (tool_submit, "Değerlendirmeyi kaydeder (bir kez çağır). Eksik/yanlış alan varsa hata listesi döner; "
-                            "düzeltip tekrar çağır.",
+    "channel": (tool_channel, "The channel's HackerTube record (how many videos, average score) and this system's earlier "
+                              "evaluations of the same channel.", {}),
+    "submit": (tool_submit, "Saves the evaluation (call once). Returns a list of errors for missing/invalid fields; "
+                            "fix them and call again.",
                {"card": {"type": "object", "description": "summary, why, content_type, level, shelf_life, primary_topic, "
                                                           "tags[], categories[] (taksonomi id'leri, 1-3), quality (0-10), "
                                                           "verdict, reasoning, highlights[{t,note}], hn_signal, audience"}}),

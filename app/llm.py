@@ -46,9 +46,9 @@ def run(prompt, system, model, timeout=300, **kw):
     try:
         d = json.loads(p.stdout)
     except Exception:
-        raise LLMError(f"claude çıktı okunamadı (rc={p.returncode}): {(p.stderr or p.stdout)[-400:]}")
+        raise LLMError(f"could not read claude output (rc={p.returncode}): {(p.stderr or p.stdout)[-400:]}")
     if d.get("is_error") or d.get("subtype") not in ("success", None):
-        raise LLMError(f"claude hata: {d.get('subtype')} {str(d.get('result'))[:300]}")
+        raise LLMError(f"claude error: {d.get('subtype')} {str(d.get('result'))[:300]}")
     return {"text": d.get("result") or "", "usd": d.get("total_cost_usd") or 0.0,
             "turns": d.get("num_turns"), "raw": d}
 
@@ -91,7 +91,7 @@ async def stream(prompt, system, model, timeout=240, **kw):
         await proc.wait()
     if not ok and not text:
         err = (await proc.stderr.read()).decode()[-300:] if proc.stderr else ""
-        raise LLMError("sohbet modeli yanıt vermedi " + err)
+        raise LLMError("the chat model did not answer " + err)
     yield ("done", {"text": text, "usd": usd})
 
 
@@ -109,4 +109,4 @@ def extract_json(text):
                     return json.loads(c[i:j + 1])
                 except Exception:
                     continue
-    raise LLMError("modelden JSON çıkmadı: " + text[:200])
+    raise LLMError("no JSON in model output: " + text[:200])

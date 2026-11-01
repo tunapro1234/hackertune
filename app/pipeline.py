@@ -16,6 +16,7 @@ import traceback
 
 from . import config, db, embed, llm, tools, yt
 
+SHORT_REASON = "too short (Short/clip)"
 DEFAULT_PROFILE = {"about": "", "more": [], "less": [], "prefs": {"hide_news": True, "max_minutes": None, "mix": {}},
                    "changelog": []}
 
@@ -59,7 +60,7 @@ def _insert_videos(con, info):
             continue
         short = v["duration"] is not None and v["duration"] < config.MIN_DURATION_S
         status = "triage_skip" if short else "new"
-        triage = json.dumps({"deep": False, "reason": "çok kısa (Shorts/klip)", "model": "kural"}) if short else None
+        triage = json.dumps({"deep": False, "reason": SHORT_REASON, "model": "rule"}) if short else None
         con.execute("""INSERT INTO videos(vid,source,title,channel,channel_id,duration,views,status,triage,pos,attempts,
                        created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,0,?,?)""",
                     (v["vid"], "sub", v["title"], info["name"], info["channel_id"], v["duration"], v["views"], status,
@@ -82,7 +83,7 @@ def process_imports(con):
         ref = it["ref"]
         try:
             if have >= config.MAX_CHANNELS_PER_USER:
-                raise RuntimeError(f"kanal sınırı ({config.MAX_CHANNELS_PER_USER})")
+                raise RuntimeError(f"channel limit reached ({config.MAX_CHANNELS_PER_USER})")
             known = None
             if yt.CID_RE.fullmatch(ref):
                 known = con.execute("SELECT * FROM channels WHERE channel_id=? AND last_fetched>?",
@@ -95,7 +96,7 @@ def process_imports(con):
             else:
                 info = yt.list_channel(ref, config.VIDEOS_PER_CHANNEL_FIRST)
                 if not info["channel_id"]:
-                    raise RuntimeError("kanal kimliği bulunamadı")
+                    raise RuntimeError("could not find the channel id")
                 with db.tx(con):
                     _upsert_channel(con, info)
                     new = _insert_videos(con, info)
@@ -111,7 +112,7 @@ def process_imports(con):
     if done >= len(items):
         con.execute("UPDATE imports SET status='done' WHERE id=?", (r["id"],))
         ok = sum(1 for x in log if x["ok"])
-        db.event(con, "import", None, f"içe aktarma #{r['id']}: {ok}/{len(items)} kanal")
+        db.event(con, "import", None, f"import #{r['id']}: {ok}/{len(items)} channels")
     return True
 
 
@@ -130,7 +131,7 @@ def refresh_channels(con, limit=3):
                 _upsert_channel(con, info)
                 n = _insert_videos(con, info)
             if n:
-                db.event(con, "refresh", None, f"{info['name']}: {n} yeni video")
+                db.event(con, "refresh", None, f"{info['name']}: {n} new videos")
         except Exception as e:
             con.execute("UPDATE channels SET last_fetched=?, fetch_error=? WHERE channel_id=?",
                         (time.time(), str(e)[:300], c["channel_id"]))
@@ -147,7 +148,7 @@ scoring >= 6/10 on lasting substance. Reject: trailers, ads/sponsor spots, annou
 videos, drama, pure entertainment without insight, news-of-the-day with no lasting value, livestream VODs without
 structure, compilation/filler, vague clickbait. Channel track record on HackerTube is a useful prior, not a guarantee.
 Answer ONLY with a JSON array; one object per input video, same order:
-[{"vid": "...", "deep": true|false, "reason": "<= 12 words, in Turkish"}]"""
+[{"vid": "...", "deep": true|false, "reason": "<= 12 words, in English"}]"""
 
 
 def triage_rows(con, n=40):
@@ -183,7 +184,7 @@ def triage_apply(con, vids, out, model, usd=0.0, by_whom=""):
                         ("triage_pass" if deep else "triage_skip",
                          json.dumps({"deep": deep, "reason": str(o.get("reason", ""))[:160], "model": model},
                                     ensure_ascii=False), time.time(), vid))
-        db.event(con, "triage", None, f"{n} video tarandı, {npass} derin incelemeye{by_whom}", usd or None)
+        db.event(con, "triage", None, f"{n} videos triaged, {npass} sent to deep evaluation{by_whom}", usd or None)
     return n, npass
 
 
@@ -199,7 +200,7 @@ def triage_batch(con, n=40):
                       timeout=180, effort="low")
         out = llm.extract_json(res["text"])
     except Exception as e:
-        db.event(con, "triage", None, f"triage hatası: {e}")
+        db.event(con, "triage", None, f"triage error: {e}")
         return False
     triage_apply(con, vids, out, config.MODEL_TRIAGE, res["usd"])
     return True
@@ -235,16 +236,15 @@ Quality scale (0-10, one decimal is fine):
  3-4.9 shallow: thin content, filler, hype, news-of-the-week, mostly entertainment
  0-2.9 empty, misleading, spam, or unavailable content
 
-Card fields (summary/why/primary_topic/tags in ENGLISH, like HackerTube's data; verdict/reasoning/highlights/
-hn_signal/audience in TURKISH, they are shown to Turkish users):
+Card fields (ALL text in ENGLISH, like HackerTube's data, even when the video itself is in another language):
 - summary: 2-3 sentences, what the video actually covers (concrete, no hype)
 - why: one sentence on why someone would point a friend to it (or what it's good for)
 - content_type: talk|lecture|course|documentary|explainer|interview|podcast|tutorial|demo|news|commentary|comedy|music|other
 - level: general|intro|intermediate|advanced ; shelf_life: evergreen|dated|news
 - primary_topic: short phrase ; tags: 3-6 short tags ; categories: 1-3 taxonomy ids from the list below, best first
-- quality, verdict (one Turkish line), reasoning (2-4 Turkish sentences with concrete evidence from the transcript)
-- highlights: 0-5 best moments [{"t": seconds, "note": "Turkish, <= 12 words"}] taken from transcript timestamps
-- hn_signal: Turkish one-liner on HN evidence ; audience: Turkish one-liner on who benefits most
+- quality, verdict (one line), reasoning (2-4 sentences with concrete evidence from the transcript)
+- highlights: 0-5 best moments [{"t": seconds, "note": "<= 12 words"}] taken from transcript timestamps
+- hn_signal: one-liner on HN evidence ; audience: one-liner on who benefits most
 
 Taxonomy ids by area:
 {TAXONOMY}
@@ -289,12 +289,12 @@ def deep_eval(vid):
                        "seconds": round(time.time() - t0)})
             con.execute("UPDATE videos SET status='evaluated', eval=?, updated_at=? WHERE vid=?",
                         (json.dumps(ev, ensure_ascii=False), time.time(), vid))
-            db.event(con, "deep", vid, f"puan {row['quality']} — {ev.get('verdict', '')} "
-                                       f"[{len(tools_used)} araç çağrısı: {', '.join(dict.fromkeys(tools_used))}]", res["usd"])
+            db.event(con, "deep", vid, f"score {row['quality']} — {ev.get('verdict', '')} "
+                                       f"[{len(tools_used)} tool calls: {', '.join(dict.fromkeys(tools_used))}]", res["usd"])
         else:
             st = "failed" if (r["attempts"] or 0) >= 1 else "triage_pass"
             con.execute("UPDATE videos SET status=?, attempts=attempts+1, updated_at=? WHERE vid=?", (st, time.time(), vid))
-            db.event(con, "deep", vid, f"başarısız ({err or 'submit çağrılmadı'}): {res.get('text', '')[:200]}", res["usd"])
+            db.event(con, "deep", vid, f"failed ({err or 'submit was not called'}): {res.get('text', '')[:200]}", res["usd"])
     return submitted
 
 
@@ -318,7 +318,7 @@ def embed_pending(con, n=64):
 FIT_SYSTEM = """You score how useful each video is for ONE specific person, given their profile (interests, what they
 want more/less of) and recent likes/dislikes. Independent of general quality (already judged), ask: would THIS person be
 glad they watched it? 0-10. Be decisive; use the full range. Answer ONLY with a JSON array, same order as input:
-[{"vid": "...", "fit": 0-10, "reason": "<= 14 words in Turkish, addressed to the person (sen), concrete"}]"""
+[{"vid": "...", "fit": 0-10, "reason": "<= 14 words in English, addressed to the person (you), concrete"}]"""
 
 
 def fit_select(con, n=25):
@@ -383,7 +383,7 @@ def fit_apply(con, job, out, usd=0.0, by_whom=""):
             con.execute("""INSERT INTO user_video(uid,vid,fit,fit_reason,fit_version) VALUES(?,?,?,?,?)
                            ON CONFLICT(uid,vid) DO UPDATE SET fit=excluded.fit, fit_reason=excluded.fit_reason,
                            fit_version=excluded.fit_version""", (job["uid"], vid, fit, reason, job["pv"]))
-        db.event(con, "fit", None, f"kullanıcı {job['uid'][:6]}: {n}/{len(job['vids'])} video kişisel puanlandı{by_whom}",
+        db.event(con, "fit", None, f"user {job['uid'][:6]}: {n}/{len(job['vids'])} videos scored for personal fit{by_whom}",
                  usd or None)
     return n
 
@@ -399,7 +399,7 @@ def personal_fit(con, n=25):
         res = llm.run(json.dumps(ctx, ensure_ascii=False), FIT_SYSTEM, config.MODEL_FIT, timeout=180, effort="low")
         out = llm.extract_json(res["text"])
     except Exception as e:
-        db.event(con, "fit", None, f"uyum puanlama hatası: {e}")
+        db.event(con, "fit", None, f"fit scoring error: {e}")
         return False
     fit_apply(con, job, out, res["usd"])
     return True
@@ -409,8 +409,8 @@ def personal_fit(con, n=25):
 
 def backfill_ht(con, n=6):
     """Verisetinde süre/tarih yok, ~%6'sı silinmiş. Yavaşça (2,5 sn aralıkla) doldurur; silinenleri gizler."""
-    rows = con.execute("""SELECT vid FROM videos WHERE source='ht' AND status='ht' AND checked_at IS NULL
-                          ORDER BY ht_score DESC LIMIT ?""", (n,)).fetchall()
+    rows = con.execute("""SELECT vid FROM videos WHERE ((source='ht' AND status='ht') OR (source='pick' AND status='pick'))
+                          AND checked_at IS NULL ORDER BY source='pick' DESC, ht_score DESC LIMIT ?""", (n,)).fetchall()
     if not rows:
         return False
     for r in rows:
@@ -421,11 +421,13 @@ def backfill_ht(con, n=6):
             continue
         if info.get("gone"):
             con.execute("UPDATE videos SET status='gone', checked_at=? WHERE vid=?", (time.time(), r["vid"]))
-            db.event(con, "backfill", r["vid"], "HackerTube videosu YouTube'da artık yok; akıştan gizlendi")
+            db.event(con, "backfill", r["vid"], "video no longer on YouTube; hidden from the feed and showcase")
         else:
             con.execute("""UPDATE videos SET duration=COALESCE(?,duration), views=COALESCE(?,views),
-                           upload_date=COALESCE(?,upload_date), checked_at=? WHERE vid=?""",
-                        (info.get("duration"), info.get("views"), info.get("upload_date"), time.time(), r["vid"]))
+                           upload_date=COALESCE(?,upload_date), channel=COALESCE(channel,?),
+                           channel_id=COALESCE(channel_id,?), checked_at=? WHERE vid=?""",
+                        (info.get("duration"), info.get("views"), info.get("upload_date"), info.get("channel"),
+                         info.get("channel_id"), time.time(), r["vid"]))
     return False  # arka plan işi: döngüyü "meşgul" saymasın
 
 
@@ -484,7 +486,8 @@ class Worker:
             for r in con.execute("SELECT vid FROM videos WHERE status='triaging'").fetchall():
                 if r["vid"] not in open_tri:
                     con.execute("UPDATE videos SET status='new' WHERE vid=?", (r["vid"],))
-            steps = (process_imports, agents.step, embed_pending, refresh_channels, backfill_ht)
+            from . import showcase
+            steps = (process_imports, agents.step, showcase.schedule, embed_pending, refresh_channels, backfill_ht)
         else:
             con.execute("UPDATE videos SET status='triage_pass' WHERE status='evaluating'")
             steps = (process_imports, triage_batch, self.start_deep, embed_pending, personal_fit, refresh_channels,

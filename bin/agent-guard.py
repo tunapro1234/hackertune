@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 ALLOWED = str(Path(__file__).resolve().parent / "ytctl")
-HEAD = re.compile(r"^" + re.escape(ALLOWED) + r" (job|meta|transcript|hn|similar|channel|submit|fail) \d+( [^;&|$`<>(){}\\\n]*)?$")
+HEAD = re.compile(r"^" + re.escape(ALLOWED) + r" (job|meta|transcript|hn|similar|channel|submit|fail|user|topics|search|top|ytsearch|ytplaylists|playlist|inspect) \d+( [^;&|$`<>(){}\\\n]*)?$")
 NEXT = re.compile(r"^" + re.escape(ALLOWED) + r" (next|cron-set) youtube-[a-z0-9-]+$")
 HEREDOC = re.compile(r"^(" + re.escape(ALLOWED) + r" submit \d+) <<\s*'([A-Z_]+)'$")
 

@@ -32,7 +32,7 @@ def ytdlp_json(url, extra=(), timeout=120):
     p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     if p.returncode != 0:
         err = (p.stderr or "").strip().splitlines()
-        raise RuntimeError(err[-1][:300] if err else f"yt-dlp çıkış kodu {p.returncode}")
+        raise RuntimeError(err[-1][:300] if err else f"yt-dlp exit code {p.returncode}")
     return json.loads(p.stdout)
 
 
@@ -214,7 +214,7 @@ def transcript_text(vid, max_chars=None):
     txt = "\n".join(f"[{fmt_ts(s)}] {x}" for s, x in t["lines"])
     if max_chars and len(txt) > max_chars:
         half = max_chars // 2
-        txt = txt[:half] + "\n[... orta kısım kısaltıldı ...]\n" + txt[-half:]
+        txt = txt[:half] + "\n[... middle part omitted ...]\n" + txt[-half:]
     return txt
 
 
@@ -256,4 +256,4 @@ def player_info(vid):
     pub = (mf.get("publishDate") or mf.get("uploadDate") or "")[:10].replace("-", "")
     return {"gone": False, "status": ps, "duration": int(vd.get("lengthSeconds") or 0) or None,
             "views": int(vd.get("viewCount") or 0) or None, "upload_date": pub or None,
-            "is_live": bool(vd.get("isLiveContent"))}
+            "is_live": bool(vd.get("isLiveContent")), "channel": vd.get("author"), "channel_id": vd.get("channelId")}

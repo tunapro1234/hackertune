@@ -10,20 +10,25 @@ import re
 import subprocess
 import time
 
-from . import config, db, pipeline, tools
+from . import config, db, english, pipeline, showcase, tools
 
 BP = os.environ.get("YT_BP_BIN", "/usr/local/bin/bp")
 YTCTL = str(config.ROOT / "bin" / "ytctl")
 
-# ad -> yapabildiği iş türleri. yt.env: YT_AGENTS="youtube-eval-1:deep,youtube-eval-2:deep,youtube-triage:triage+fit"
+# ad -> yapabildiği iş türleri. yt.env: YT_AGENTS="youtube-eval-1:deep,...,youtube-curator:curate"
+DEFAULT_AGENTS = ("youtube-eval-1:deep,youtube-eval-2:deep,youtube-triage:triage+fit+translate,"
+                  "youtube-curator:curate")
 AGENTS = {}
-for part in (os.environ.get("YT_AGENTS") or "youtube-eval-1:deep,youtube-eval-2:deep,youtube-triage:triage+fit").split(","):
+for part in (os.environ.get("YT_AGENTS") or DEFAULT_AGENTS).split(","):
     if ":" in part:
         name, kinds = part.split(":", 1)
         AGENTS[name.strip()] = set(kinds.strip().split("+"))
 
-TIMEOUT = {"deep": 25 * 60, "triage": 12 * 60, "fit": 12 * 60}
-KIND_TR = {"deep": "derin değerlendirme", "triage": "ön eleme", "fit": "kişisel uyum puanlama"}
+TIMEOUT = {"deep": 25 * 60, "triage": 12 * 60, "fit": 12 * 60, "translate": 12 * 60, "curate": 45 * 60}
+KIND_NAME = {"deep": "deep evaluation", "triage": "triage", "fit": "personal fit scoring",
+             "translate": "rewrite stored texts in English", "curate": "showcase curation"}
+LANG_LINE = ("LANGUAGE: from now on write ALL text you produce (cards, verdicts, reasoning, highlights, reasons, "
+             "titles, whys) in English, even if the video or older examples are in Turkish or another language.\n")
 
 _status_cache = {"at": 0, "data": {}}
 
@@ -83,7 +88,7 @@ def _release(con, job, note):
         con.execute(f"UPDATE videos SET status='new' WHERE status='triaging' AND vid IN ({','.join('?' * len(p['vids']))})",
                     p["vids"])
     con.execute("UPDATE jobs SET status='failed', note=?, done_at=? WHERE id=?", (note[:500], time.time(), job["id"]))
-    db.event(con, job["kind"], p.get("vid"), f"agent işi #{job['id']} ({job['agent']}) başarısız: {note[:200]}")
+    db.event(con, job["kind"], p.get("vid"), f"agent job #{job['id']} ({job['agent']}) failed: {note[:200]}")
 
 
 def finish(con, jid, note=None):
@@ -112,6 +117,12 @@ def _make_job(con, agent, kinds):
         job, _ = pipeline.fit_select(con, 25)
         if job:
             return "fit", job
+    if "translate" in kinds:
+        english.fix_rule_reasons(con)
+        english.fix_changelogs(con)
+        job = english.select(con)
+        if job:
+            return "translate", job
     return None
 
 
@@ -121,13 +132,21 @@ def claim(con, agent):
         r = con.execute("SELECT id FROM jobs WHERE status='sent' AND agent=? ORDER BY id LIMIT 1", (agent,)).fetchone()
         if r:
             return r["id"]
+        if "curate" in AGENTS[agent]:  # vitrin işleri worker/web tarafından kuyruğa konur (status='queued')
+            q = con.execute("""SELECT id FROM jobs WHERE kind='curate' AND status='queued'
+                               ORDER BY COALESCE(json_extract(payload,'$.prio'),1), id LIMIT 1""").fetchone()
+            if q:
+                con.execute("UPDATE jobs SET status='sent', agent=?, sent_at=? WHERE id=?", (agent, time.time(), q["id"]))
+                db.event(con, "curate", None, f"job #{q['id']} → {agent} ({KIND_NAME['curate']})")
+                return q["id"]
         mk = _make_job(con, agent, AGENTS[agent])
         if not mk:
             return None
         kind, payload = mk
         jid = _new_job(con, kind, payload, agent)
-        what = f"vid={payload['vid']}" if kind == "deep" else f"{len(payload['vids'])} video"
-        db.event(con, kind, payload.get("vid"), f"iş #{jid} → {agent} ({KIND_TR[kind]}, {what})")
+        what = (f"vid={payload['vid']}" if kind == "deep" else f"{len(payload['keys'])} texts" if kind == "translate"
+                else f"{len(payload['vids'])} videos")
+        db.event(con, kind, payload.get("vid"), f"job #{jid} → {agent} ({KIND_NAME[kind]}, {what})")
     return jid
 
 
@@ -145,7 +164,7 @@ def step(con):
         j = job_get(con, r["id"])
         if now - (j["sent_at"] or now) > TIMEOUT.get(j["kind"], 1200):
             with db.tx(con):
-                _release(con, j, "zaman aşımı")
+                _release(con, j, "timed out")
             busy = True
     states = agent_states(60)
     db.kv_set(con, "agent_states", {"at": now, "states": states})
@@ -172,28 +191,31 @@ def summary(con):
 def _cmds(jid, kind):
     c = YTCTL
     if kind == "deep":
-        return f"""KOMUTLAR (Bash ile; yalnızca ytctl izinli, başka komut engellenir):
+        return f"""COMMANDS (Bash; only ytctl is allowed, anything else is blocked):
   {c} meta {jid}
   {c} transcript {jid} [offset] [max_chars<=20000]     (next_offset ile devam)
   {c} hn {jid} [serbest sorgu]
   {c} similar {jid} [metin]
   {c} channel {jid}
   {c} submit {jid} <<'EOF'
-  {{ ...kart JSON... }}
+  {{ ...card JSON... }}
   EOF
-  {c} fail {jid} "sebep"        (video açılamıyor/silinmiş vb.)"""
-    return f"""KOMUTLAR (Bash ile; yalnızca ytctl izinli):
+  {c} fail {jid} "reason"        (video unavailable/deleted etc.)"""
+    return f"""COMMANDS (Bash; only ytctl is allowed):
   {c} submit {jid} <<'EOF'
-  [ ...JSON dizi... ]
+  [ ...JSON array... ]
   EOF
-  {c} fail {jid} "sebep\""""
+  {c} fail {jid} "reason\""""
 
 
 def job_text(con, j):
     jid, kind, p = j["id"], j["kind"], j["payload"]
-    head = f"İŞ #{jid} — {KIND_TR[kind]}  (durum: {j['status']})\n"
+    if kind == "curate" and j["status"] == "sent":
+        return showcase.job_text(con, j)
+    head = f"JOB #{jid} — {KIND_NAME[kind]}  (status: {j['status']})\n"
     if j["status"] != "sent":
-        return head + "Bu iş artık açık değil; bir şey yapma."
+        return head + "This job is no longer open; do nothing."
+    head += LANG_LINE
     if kind == "deep":
         r = con.execute("SELECT * FROM videos WHERE vid=?", (p["vid"],)).fetchone()
         info = (f"vid={p['vid']}\nTitle: {r['title']}\nChannel: {r['channel']}\n"
@@ -212,6 +234,10 @@ def job_text(con, j):
     if kind == "fit":
         ctx = pipeline.fit_context(con, p["uid"], p["vids"])
         return head + _cmds(jid, kind) + "\n\n" + pipeline.FIT_SYSTEM + "\n\nINPUT:\n" + json.dumps(ctx, ensure_ascii=False)
+    if kind == "translate":
+        items = english.job_items(con, p["keys"])
+        return (head + _cmds(jid, kind) + "\n\n" + english.TRANSLATE_SYSTEM + "\n\nITEMS:\n" +
+                json.dumps(items, ensure_ascii=False, indent=0))
     return head
 
 
@@ -232,9 +258,9 @@ def submit(con, j, data):
             need.add("transcript")
         missing = sorted(need - called)
         if missing:
-            return {"ok": False, "errors": [f"Önce şunları çalıştır: {', '.join(missing)}"]}
+            return {"ok": False, "errors": [f"Run these first: {', '.join(missing)}"]}
         if not isinstance(data, dict):
-            return {"ok": False, "errors": ["kart bir JSON nesnesi olmalı"]}
+            return {"ok": False, "errors": ["the card must be a JSON object"]}
         res = tools.tool_submit(vid, data.get("card") if isinstance(data.get("card"), dict) else data,
                                 model=f"agent:{j['agent']}")
         if not res.get("ok"):
@@ -247,28 +273,36 @@ def submit(con, j, data):
             con.execute("UPDATE videos SET status='evaluated', eval=?, updated_at=? WHERE vid=?",
                         (json.dumps(ev, ensure_ascii=False), time.time(), vid))
             db.add_spend(con, "deep", 0.0, 1)
-            db.event(con, "deep", vid, f"puan {row['quality']} — {ev.get('verdict', '')} "
-                                       f"[{j['agent']}, iş #{jid}, {len(used)} komut: {', '.join(dict.fromkeys(used))}]")
+            db.event(con, "deep", vid, f"score {row['quality']} — {ev.get('verdict', '')} "
+                                       f"[{j['agent']}, job #{jid}, {len(used)} commands: {', '.join(dict.fromkeys(used))}]")
             finish(con, jid)
-        return {"ok": True, "message": "Kaydedildi. İş bitti; tek kısa cümleyle bitir ve sonraki mesajı bekle."}
+        return {"ok": True, "message": "Saved. Job done; run ytctl next again."}
+    if kind == "curate":
+        return showcase.submit(con, j, data)
     if not isinstance(data, list):
-        return {"ok": False, "errors": ["JSON dizi bekleniyordu"]}
+        return {"ok": False, "errors": ["expected a JSON array"]}
+    if kind == "translate":
+        n = english.apply(con, p["keys"], data)
+        with db.tx(con):
+            finish(con, jid, f"{n}/{len(p['keys'])} rewritten")
+        return {"ok": True, "message": f"{n}/{len(p['keys'])} items saved. Job done."}
     if kind == "triage":
         n, npass = pipeline.triage_apply(con, p["vids"], data, f"agent:{j['agent']}", 0.0, by)
         with db.tx(con):
-            finish(con, jid, f"{n} tarandı, {npass} geçti")
+            finish(con, jid, f"{n} triaged, {npass} passed")
         miss = len(p["vids"]) - n
-        return {"ok": True, "message": f"{n} video kaydedildi ({npass} derin incelemeye)."
-                                       + (f" {miss} video eksikti, kuyruğa döndü." if miss else "") + " İş bitti."}
+        return {"ok": True, "message": f"{n} videos saved ({npass} to deep evaluation)."
+                                       + (f" {miss} videos were missing and went back to the queue." if miss else "")
+                                       + " Job done."}
     if kind == "fit":
         n = pipeline.fit_apply(con, p, data, 0.0, by)
         with db.tx(con):
-            finish(con, jid, f"{n} puanlandı")
-        return {"ok": True, "message": f"{n} video puanlandı. İş bitti."}
-    return {"ok": False, "errors": ["bilinmeyen iş türü"]}
+            finish(con, jid, f"{n} scored")
+        return {"ok": True, "message": f"{n} videos scored. Job done."}
+    return {"ok": False, "errors": ["unknown job kind"]}
 
 
 def fail(con, j, reason):
     with db.tx(con):
-        _release(con, j, f"agent vazgeçti: {reason}")
-    return {"ok": True, "message": "Not alındı, iş kapandı."}
+        _release(con, j, f"agent gave up: {reason}")
+    return {"ok": True, "message": "Noted, job closed."}

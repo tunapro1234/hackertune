@@ -21,7 +21,7 @@ def _env(name, default, cast=str):
 
 
 PORT = _env("YT_PORT", 3030, int)
-PUBLIC_URL = _env("YT_PUBLIC_URL", "https://yt.tunapro.xyz").rstrip("/")  # Origin kontrolü ve senkron linki için
+PUBLIC_URL = _env("YT_PUBLIC_URL", "https://ht.tunapro.xyz").rstrip("/")  # Origin kontrolü ve senkron linki için
 CLAUDE_BIN = _env("YT_CLAUDE_BIN", "/root/.local/bin/claude")
 YTDLP_BIN = _env("YT_YTDLP_BIN", "/usr/local/bin/yt-dlp")
 
@@ -52,3 +52,5 @@ VIDEOS_PER_CHANNEL_REFRESH = _env("YT_VIDEOS_PER_CHANNEL_REFRESH", 15, int)
 MIN_DURATION_S = _env("YT_MIN_DURATION_S", 150, int)  # Shorts ve kırıntıları ele
 
 COOKIE = "yt_tok"
+# Eski alan adları: buraya gelen istek PUBLIC_URL'e yönlenir, oturum çerezi /s/ linkiyle taşınır
+OLD_HOSTS = [h.strip() for h in _env("YT_OLD_HOSTS", "").split(",") if h.strip()]

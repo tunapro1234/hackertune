@@ -1,11 +1,11 @@
 # HackerTune
 
 HackerTube'un ([hackertube.org](https://hackertube.org), Andrej Karpathy) verisi üzerine kurulu, kendi barındırdığın bir YouTube
-arayüzü. Canlı örnek: https://yt.tunapro.xyz
+arayüzü. Canlı örnek: https://ht.tunapro.xyz
 
 *A self-hosted YouTube front end built on the HackerTube dataset: the videos Hacker News keeps recommending, plus your
 own subscriptions vetted by Claude Code agents, chat about any video, a conversational recommender, and background
-audio that keeps playing with the phone's screen off. UI text is Turkish.*
+audio that keeps playing with the phone's screen off. The UI is in English; this README is in Turkish.*
 
 ## Ne yapar
 
@@ -16,6 +16,8 @@ audio that keeps playing with the phone's screen off. UI text is Turkish.*
   okur, Hacker News'te arar, HackerTube'daki benzerleriyle kıyaslar ve 0–10 puan + HackerTube formatında kart yazar.
   Eşiği geçenler akışa girer.
 - **Video sohbeti:** transcript'i, kartı ve HN yorumlarını okuyan sohbet; zaman damgalarına tıklayınca video oraya atlar.
+- **Vitrin (Showcase):** kişisel küratör agent'ı (`youtube-curator`) geçmişine, beğenilerine ve profiline bakıp raflar kurar:
+  seçkiler, sırayla izlenecek seriler ve hiç aramayacağın ama bayılacağın uzak konulardan sürprizler (katalog dışından da).
 - **Konuşarak yönlendirilen algoritma:** "daha az siyaset, daha çok donanım" dersin, profilin açıkça güncellenir.
 - **Ekran kapalıyken dinleme:** telefonda ses kendi `<audio>` oynatıcısından gelir, video sessiz ve senkron akar;
   telefonu kilitlesen de ses sürer (iPhone'da gerçek cihazda doğrulandı). Kilit ekranı kontrolleri Media Session ile.
@@ -29,7 +31,8 @@ nginx ── yt-web  (FastAPI, app/web.py)      SPA (app/static), API, ses vekil
      └─ SQLite (var/yt.db, WAL)
          yt-worker (app/worker.py)           içe aktarma, kanal tarama, embedding, iş kuyruğu (jobs)
              ▲ ytctl next / submit
-         Claude Code agent'ları (bp ile tmux'ta): youtube-eval-1/2 (derin), youtube-triage (ön eleme + uyum)
+         Claude Code agent'ları (bp ile tmux'ta): youtube-eval-1/2 (derin), youtube-triage (ön eleme + uyum + çeviri),
+                                             youtube-curator (vitrin)
 ```
 
 - **Çekme modeli:** agent'lar `bin/ytctl next <ad>` ile kuyruktan iş alır, `ytctl meta|transcript|hn|similar|channel`
@@ -68,7 +71,11 @@ Agent'lar (isteğe bağlı, `YT_BACKEND=agents`):
 bp open youtube-eval-1 $PWD/agents/eval-1 --claude --parent youtube
 bp open youtube-eval-2 $PWD/agents/eval-2 --claude --parent youtube
 bp open youtube-triage $PWD/agents/triage --claude --parent youtube
+bp open youtube-curator $PWD/agents/curator --claude --parent youtube
 ```
+
+iOS uygulaması (WKWebView kabuğu, arka plan sesi) `ios/` altında; Mac gerekmez, GitHub Actions'ta derlenip TestFlight'a
+yüklenir. Adımlar: [ios/README.md](ios/README.md).
 
 Her agent'ın modeli ve kancası `agents/<ad>/.claude/settings.local.json` içinde, talimatları `agents/<ad>/CLAUDE.md`.
 Bu dosyalardaki `/srv/youtube` yolları mutlaktır; başka bir dizine kurduysan `grep -rl /srv/youtube agents | xargs sed -i

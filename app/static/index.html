@@ -1,62 +1,67 @@
 <!doctype html>
-<html lang="tr">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>HackerTune</title>
-<meta name="description" content="HackerTube çatalı: Hacker News'in yıllardır önerdiği videolar, aboneliklerinden agent'ların seçtikleri, video sohbeti, konuşarak yönlendirilen algoritma ve ekran kapalıyken dinleme.">
+<meta name="description" content="The videos Hacker News keeps recommending, your subscriptions vetted by Claude agents, a curated showcase, chat about any video, and listening with the screen off.">
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0f0f0f" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#0d0d10" media="(prefers-color-scheme: dark)">
 <link rel="manifest" href="/static/manifest.json">
 <link rel="apple-touch-icon" href="/static/icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23ff6a00'/><path d='M12 9l11 7-11 7z' fill='white'/></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='9' fill='%230f766e'/><path d='M13 10.5v11l9-5.5z' fill='white'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <script>try{var t=localStorage.getItem("theme");if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
-<link rel="stylesheet" href="/static/style.css?v=8">
+<link rel="stylesheet" href="/static/style.css?v=10">
 </head>
 <body>
 <header class="top">
-  <button class="ib" id="menuBtn" aria-label="Menü" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg></button>
-  <a class="brand" href="/" data-link aria-label="HackerTune ana sayfa">Hacker<span>Tune</span></a>
+  <button class="ib" id="menuBtn" aria-label="Menu" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M3 6.5h18v1.6H3zm0 4.7h18v1.6H3zm0 4.7h18v1.6H3z"/></svg></button>
+  <a class="brand" href="/" data-link aria-label="HackerTune home"><span class="mark"><svg viewBox="0 0 24 24"><path d="M6 3.5v17L20 12z"/></svg></span><span class="word">HackerTune</span></a>
   <form class="search" id="searchForm" role="search">
-    <input id="q" type="search" placeholder="Ara" autocomplete="off" aria-label="Ara">
-    <button type="submit" aria-label="Ara"><svg viewBox="0 0 24 24"><path d="M15.5 14h-.8l-.3-.3A6.5 6.5 0 1 0 9.5 16a6.5 6.5 0 0 0 4.2-1.6l.3.3v.8l5 5 1.5-1.5-5-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg></button>
+    <input id="q" type="search" placeholder="Search videos, topics, ideas" autocomplete="off" aria-label="Search">
+    <button type="submit" aria-label="Search"><svg viewBox="0 0 24 24"><path d="M15.5 14h-.8l-.3-.3A6.5 6.5 0 1 0 9.5 16a6.5 6.5 0 0 0 4.2-1.6l.3.3v.8l5 5 1.5-1.5-5-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg></button>
   </form>
   <div class="right">
-    <a class="ib" href="/hakkinda" data-link aria-label="Bu site nedir?" title="Bu site nedir?"><svg viewBox="0 0 24 24"><path d="M11 18h2v-2h-2v2zm1-16a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16zm0-14a4 4 0 0 0-4 4h2a2 2 0 1 1 4 0c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5a4 4 0 0 0-4-4z"/></svg></a>
-    <button class="ib" id="themeBtn" aria-label="Tema" title="Açık/koyu tema"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36A5.5 5.5 0 0 1 13.36 3.1 9 9 0 0 0 12 3z"/></svg></button>
+    <a class="ib" href="/about" data-link aria-label="What is this?" title="What is this?"><svg viewBox="0 0 24 24"><path d="M11 18h2v-2h-2v2zm1-16a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16zm0-14a4 4 0 0 0-4 4h2a2 2 0 1 1 4 0c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5a4 4 0 0 0-4-4z"/></svg></a>
+    <button class="ib" id="themeBtn" aria-label="Theme" title="Light/dark theme"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36A5.5 5.5 0 0 1 13.36 3.1 9 9 0 0 0 12 3z"/></svg></button>
   </div>
 </header>
 <div class="scrim" id="scrim" hidden></div>
-<nav class="side" id="side" aria-label="Menü">
-  <a href="/" data-link data-nav="home"><svg viewBox="0 0 24 24"><path d="M12 3 2 12h3v8h6v-6h2v6h6v-8h3z"/></svg><span>Ana sayfa</span></a>
-  <a href="/abonelikler" data-link data-nav="subs"><svg viewBox="0 0 24 24"><path d="M4 6h16v2H4zm2-4h12v2H6zm14 8H4a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2zm-10 9v-6l5 3z"/></svg><span>Abonelikler</span></a>
-  <a href="/liste?t=liked" data-link data-nav="liked"><svg viewBox="0 0 24 24"><path d="M2 21h4V9H2v12zm20-11a2 2 0 0 0-2-2h-6.3l1-4.6v-.3c0-.4-.2-.8-.4-1.1L13.2 1 6.6 7.6C6.2 8 6 8.5 6 9v10a2 2 0 0 0 2 2h9c.8 0 1.5-.5 1.8-1.2l3-7.1c.1-.2.2-.5.2-.7v-2z"/></svg><span>Beğenilenler</span></a>
-  <a href="/gecmis" data-link data-nav="history"><svg viewBox="0 0 24 24"><path d="M13 3a9 9 0 0 0-9 9H1l3.9 3.9L9 12H6a7 7 0 1 1 2.05 4.95l-1.42 1.42A9 9 0 1 0 13 3zm-1 5v5l4.25 2.52.77-1.28-3.52-2.09V8z"/></svg><span>Geçmiş</span></a>
-  <a href="/liste?t=later" data-link data-nav="later"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16zm.5-13H11v6l5.2 3.2.8-1.3-4.5-2.7z"/></svg><span>Sonra izle</span></a>
-  <a href="/kategoriler" data-link data-nav="cats"><svg viewBox="0 0 24 24"><path d="M3 3h8v8H3zm2 2v4h4V5zm8-2h8v8h-8zm2 2v4h4V5zM3 13h8v8H3zm2 2v4h4v-4zm8-2h8v8h-8zm2 2v4h4v-4z"/></svg><span>Kategoriler</span></a>
-  <hr>
-  <a href="/algoritma" data-link data-nav="algo"><svg viewBox="0 0 24 24"><path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"/></svg><span>Algoritma</span></a>
-  <a href="/hakkinda" data-link data-nav="about"><svg viewBox="0 0 24 24"><path d="M11 7h2v2h-2zm0 4h2v6h-2zm1-9a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16z"/></svg><span>Hakkında</span></a>
-  <p class="credit">Veri: <a href="https://hackertube.org" target="_blank" rel="noopener">HackerTube</a> (ODC-By) · HN verisi Y Combinator'ın, yorumlar yazarlarının. YouTube, Google, HN ya da YC ile bağlantılı değildir.</p>
+<nav class="side" id="side" aria-label="Menu">
+  <a href="/" data-link data-nav="home"><svg viewBox="0 0 24 24"><path d="M12 3 2 12h3v8h6v-6h2v6h6v-8h3z"/></svg><span>Feed</span></a>
+  <a href="/showcase" data-link data-nav="showcase"><svg viewBox="0 0 24 24"><path d="M12 2l2.4 6.9H21l-5.4 4.1 2 7L12 15.8 6.4 20l2-7L3 8.9h6.6z"/></svg><span>Showcase</span></a>
+  <a href="/subscriptions" data-link data-nav="subs"><svg viewBox="0 0 24 24"><path d="M4 6h16v2H4zm2-4h12v2H6zm14 8H4a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2zm-10 9v-6l5 3z"/></svg><span>Subscriptions</span></a>
+  <a href="/topics" data-link data-nav="cats"><svg viewBox="0 0 24 24"><path d="M3 3h8v8H3zm2 2v4h4V5zm8-2h8v8h-8zm2 2v4h4V5zM3 13h8v8H3zm2 2v4h4v-4zm8-2h8v8h-8zm2 2v4h4v-4z"/></svg><span>Topics</span></a>
+  <div class="grp">Library</div>
+  <a href="/history" data-link data-nav="history"><svg viewBox="0 0 24 24"><path d="M13 3a9 9 0 0 0-9 9H1l3.9 3.9L9 12H6a7 7 0 1 1 2.05 4.95l-1.42 1.42A9 9 0 1 0 13 3zm-1 5v5l4.25 2.52.77-1.28-3.52-2.09V8z"/></svg><span>History</span></a>
+  <a href="/library?t=later" data-link data-nav="later"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16zm.5-13H11v6l5.2 3.2.8-1.3-4.5-2.7z"/></svg><span>Watch later</span></a>
+  <a href="/library?t=liked" data-link data-nav="liked"><svg viewBox="0 0 24 24"><path d="M2 21h4V9H2v12zm20-11a2 2 0 0 0-2-2h-6.3l1-4.6v-.3c0-.4-.2-.8-.4-1.1L13.2 1 6.6 7.6C6.2 8 6 8.5 6 9v10a2 2 0 0 0 2 2h9c.8 0 1.5-.5 1.8-1.2l3-7.1c.1-.2.2-.5.2-.7v-2z"/></svg><span>Liked</span></a>
+  <div class="grp">You</div>
+  <a href="/algorithm" data-link data-nav="algo"><svg viewBox="0 0 24 24"><path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"/></svg><span>Algorithm</span></a>
+  <a href="/about" data-link data-nav="about"><svg viewBox="0 0 24 24"><path d="M11 7h2v2h-2zm0 4h2v6h-2zm1-9a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16z"/></svg><span>About</span></a>
+  <p class="credit">Data: <a href="https://hackertube.org" target="_blank" rel="noopener">HackerTube</a> (ODC-By). HN data belongs to Y Combinator, comments to their authors. Not affiliated with YouTube, Google, HN or YC.</p>
 </nav>
 <main id="main" tabindex="-1"></main>
 <div class="mini" id="mini" hidden>
-  <div class="mini-bar"><input type="range" id="miniSeek" min="0" max="1000" value="0" aria-label="Konum"></div>
+  <div class="mini-bar"><input type="range" id="miniSeek" min="0" max="1000" value="0" aria-label="Position"></div>
   <div class="mini-row">
-    <a class="mini-thumb" id="miniThumb" href="#" data-link aria-label="Videoya dön"></a>
+    <a class="mini-thumb" id="miniThumb" href="#" data-link aria-label="Back to video"></a>
     <div class="mini-txt"><a id="miniTitle" href="#" data-link></a><span id="miniSub"></span></div>
-    <button class="ib" id="miniBack" aria-label="15 saniye geri"><svg viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z"/><text x="12" y="16.5" font-size="6.5" text-anchor="middle" font-family="sans-serif" font-weight="700">15</text></svg></button>
-    <button class="ib play" id="miniPlay" aria-label="Oynat/duraklat"><svg viewBox="0 0 24 24"><path id="miniPlayPath" d="M8 5v14l11-7z"/></svg></button>
-    <button class="ib" id="miniFwd" aria-label="30 saniye ileri"><svg viewBox="0 0 24 24"><path d="M12 5V1l5 5-5 5V7a6 6 0 1 0 6 6h2a8 8 0 1 1-8-8z"/><text x="12" y="16.5" font-size="6.5" text-anchor="middle" font-family="sans-serif" font-weight="700">30</text></svg></button>
-    <button class="ib" id="miniNext" aria-label="Sıradaki"><svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
-    <button class="ib small" id="miniRate" aria-label="Hız">1×</button>
-    <button class="ib" id="miniClose" aria-label="Kapat"><svg viewBox="0 0 24 24"><path d="M19 6.4 17.6 5 12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12z"/></svg></button>
+    <button class="ib" id="miniBack" aria-label="Back 15 seconds"><svg viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z"/><text x="12" y="16.5" font-size="6.5" text-anchor="middle" font-family="sans-serif" font-weight="700">15</text></svg></button>
+    <button class="ib play" id="miniPlay" aria-label="Play/pause"><svg viewBox="0 0 24 24"><path id="miniPlayPath" d="M8 5v14l11-7z"/></svg></button>
+    <button class="ib" id="miniFwd" aria-label="Forward 30 seconds"><svg viewBox="0 0 24 24"><path d="M12 5V1l5 5-5 5V7a6 6 0 1 0 6 6h2a8 8 0 1 1-8-8z"/><text x="12" y="16.5" font-size="6.5" text-anchor="middle" font-family="sans-serif" font-weight="700">30</text></svg></button>
+    <button class="ib" id="miniNext" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
+    <button class="ib small" id="miniRate" aria-label="Speed">1×</button>
+    <button class="ib" id="miniClose" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M19 6.4 17.6 5 12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12z"/></svg></button>
   </div>
   <audio id="audio" preload="none" playsinline></audio>
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
-<script src="/static/app.js?v=11"></script>
+<script src="/static/app.js?v=14"></script>
 </body>
 </html>

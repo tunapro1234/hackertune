@@ -16,15 +16,36 @@ from . import config, db, embed
 from .ingest_ht import ht_quality
 
 POOLS = {
-    "subs": ("Aboneliklerin", 0.30),
-    "foryou": ("Sana göre", 0.22),
-    "cohort": ("Aynı HN'cilerden", 0.10),
-    "classics": ("Klasikler", 0.12),
-    "gems": ("Cevherler", 0.09),
-    "fresh": ("Yeni favoriler", 0.09),
-    "explore": ("Keşfet", 0.06),
-    "community": ("Topluluktan", 0.05),
+    "subs": ("Your subscriptions", 0.30),
+    "foryou": ("For you", 0.22),
+    "cohort": ("Same HN crowd", 0.10),
+    "classics": ("Classics", 0.12),
+    "gems": ("Hidden gems", 0.09),
+    "fresh": ("New favorites", 0.09),
+    "explore": ("Explore", 0.06),
+    "community": ("From the community", 0.05),
 }
+
+
+def meta_of(r):
+    """videos satırı -> öneri motorunun video sözlüğü (Index ve vitrin aynı biçimi kullanır)."""
+    card = db.jload(r["card"], {}) or {}
+    ht = db.jload(r["ht"], {}) or {}
+    ev = db.jload(r["eval"], {}) or {}
+    hn = ht.get("hn") or {}
+    return {
+        "vid": r["vid"], "source": r["source"], "title": r["title"], "channel": r["channel"],
+        "channel_id": r["channel_id"], "duration": r["duration"], "upload_date": r["upload_date"],
+        "views": r["views"], "quality": r["quality"] if r["quality"] is not None else
+        (ht_quality(r["ht_score"]) if r["source"] == "ht" else None),
+        "ht_score": r["ht_score"], "hn": hn, "quote": ht.get("quote"), "summary": card.get("summary"),
+        "why": card.get("why"), "content_type": card.get("content_type"), "level": card.get("level"),
+        "shelf_life": card.get("shelf_life"), "topic": card.get("primary_topic"),
+        "cats": [c["id"] for c in card.get("categories") or []],
+        "cat_names": [c["name"] for c in card.get("categories") or []],
+        "areas": list(dict.fromkeys(c["area"] for c in card.get("categories") or [])),
+        "verdict": ev.get("verdict"),
+    }
 
 
 class Index:
@@ -50,22 +71,7 @@ class Index:
                 e = ht_emb[i]
             else:
                 e = np.frombuffer(r["emb"], dtype=np.float32)
-            card = db.jload(r["card"], {}) or {}
-            ht = db.jload(r["ht"], {}) or {}
-            ev = db.jload(r["eval"], {}) or {}
-            hn = ht.get("hn") or {}
-            metas.append({
-                "vid": r["vid"], "source": r["source"], "title": r["title"], "channel": r["channel"],
-                "channel_id": r["channel_id"], "duration": r["duration"], "upload_date": r["upload_date"],
-                "views": r["views"], "quality": r["quality"] if r["quality"] is not None else ht_quality(r["ht_score"]),
-                "ht_score": r["ht_score"], "hn": hn, "quote": ht.get("quote"), "summary": card.get("summary"),
-                "why": card.get("why"), "content_type": card.get("content_type"), "level": card.get("level"),
-                "shelf_life": card.get("shelf_life"), "topic": card.get("primary_topic"),
-                "cats": [c["id"] for c in card.get("categories") or []],
-                "cat_names": [c["name"] for c in card.get("categories") or []],
-                "areas": list(dict.fromkeys(c["area"] for c in card.get("categories") or [])),
-                "verdict": ev.get("verdict"),
-            })
+            metas.append(meta_of(r))
             vids.append(r["vid"])
             embs.append(e)
         rel = {r["vid"]: json.loads(r["related"]) for r in con.execute("SELECT vid, related FROM related")}
@@ -139,7 +145,7 @@ def _signals(ix, ctx):
             pos.append(ix.E[ix.row[v]]); pos_lab.append(("liked", ix.metas[ix.row[v]]["title"]))
     about = (ctx["profile"].get("about") or "").strip()
     if about:
-        pos.append(_topic_vec(about[:500])); pos_lab.append(("about", "profilin"))
+        pos.append(_topic_vec(about[:500])); pos_lab.append(("about", "your profile"))
     for t in ctx["profile"].get("less") or []:
         neg.append(_topic_vec(t)); neg_lab.append(t)
     for v in ctx["disliked"][-40:]:
@@ -207,10 +213,10 @@ def build_feed(con, uid, page=0, seed=None, area=None, per_page=24):
             return None
         kind, lab = pos_lab[j]
         if kind == "topic":
-            return f"İlgi alanına yakın: “{lab}”"
+            return f"Close to your interest: “{lab}”"
         if kind == "liked":
-            return f"Beğendiğin “{lab[:60]}” videosuna benziyor"
-        return "Profilindeki tarife uyuyor"
+            return f"Similar to “{lab[:60]}”, which you liked"
+        return "Matches the description in your profile"
 
     pools = {}
     # 1) abonelikler
@@ -223,11 +229,11 @@ def build_feed(con, uid, page=0, seed=None, area=None, per_page=24):
         fit = ctx["fit"].get(m["vid"])
         s = 0.5 * m["quality"] + 0.5 * (fit[0] if fit else m["quality"]) + _recency_bonus(m["upload_date"]) - pen[i]
         if fit and fit[1]:
-            why = f"kalite {m['quality']:.1f} · sana uyum {fit[0]:.0f}/10 — {fit[1]}"
+            why = f"quality {m['quality']:.1f} · fit for you {fit[0]:.0f}/10 — {fit[1]}"
         elif m["source"] == "sub":
-            why = f"agent puanı {m['quality']:.1f}/10 — {m['verdict'] or ''}"
+            why = f"agent score {m['quality']:.1f}/10 — {m['verdict'] or ''}"
         else:
-            why = f"{m['channel']} · HN'de de {m['hn'].get('rec_months', 0)} ayrı ayda önerildi"
+            why = f"{m['channel']} · also recommended on HN in {m['hn'].get('rec_months', 0)} different months"
         sc.append((s, i, why))
     pools["subs"] = [(i, w) for s, i, w in sorted(sc, key=lambda x: -x[0])]
 
@@ -246,8 +252,8 @@ def build_feed(con, uid, page=0, seed=None, area=None, per_page=24):
                     a = agg.setdefault(r["vid"], [0, v])
                     a[0] += r["shared_recommenders"]
         lst = sorted(agg.items(), key=lambda kv: -kv[1][0])
-        pools["cohort"] = [(ix.row[v], f"“{ix.metas[ix.row[src]]['title'][:50]}” videosunu önerenler bunu da önerdi "
-                                       f"({n} ortak kişi)") for v, (n, src) in lst if ok[ix.row[v]]]
+        pools["cohort"] = [(ix.row[v], f"People who recommended “{ix.metas[ix.row[src]]['title'][:50]}” also recommended this "
+                                       f"({n} in common)") for v, (n, src) in lst if ok[ix.row[v]]]
     boost = interest * 2 - pen
 
     def sample(mask, weights, k, reason):
@@ -264,13 +270,13 @@ def build_feed(con, uid, page=0, seed=None, area=None, per_page=24):
     strong = np.array([(m["hn"] or {}).get("strong_recs", 0) for m in ix.metas])
     first = np.array([(m["hn"] or {}).get("first_year") or 0 for m in ix.metas])
     pools["classics"] = sample(ix.is_ht & (hs >= 9), hs, 200,
-                               lambda i: f"HN'de {ix.metas[i]['hn'].get('rec_months')} ayrı ayda, "
-                                         f"{ix.metas[i]['hn'].get('recommenders')} kişi önerdi")
+                               lambda i: f"Recommended on HN by {ix.metas[i]['hn'].get('recommenders')} people "
+                                         f"in {ix.metas[i]['hn'].get('rec_months')} different months")
     pools["gems"] = sample(ix.is_ht & (hs >= 3.5) & (hs < 9) & (recs <= 7) & (strong >= 2), hs, 200,
-                           lambda i: f"{ix.metas[i]['hn'].get('recommenders')} kişi önerdi, "
-                                     f"{ix.metas[i]['hn'].get('strong_recs')} tanesi coşkuyla")
+                           lambda i: f"Recommended by {ix.metas[i]['hn'].get('recommenders')} people, "
+                                     f"{ix.metas[i]['hn'].get('strong_recs')} of them enthusiastically")
     pools["fresh"] = sample(ix.is_ht & (first >= 2024) & (hs >= 3), hs, 200,
-                            lambda i: f"{ix.metas[i]['hn'].get('first_year')}'ten beri HN'de önerilmeye başlandı")
+                            lambda i: f"Recommended on HN since {ix.metas[i]['hn'].get('first_year')}")
     # keşfet: kullanıcının hiç dokunmadığı kategoriler
     touched = set()
     for v in ctx["liked"] + ctx["disliked"]:
@@ -283,12 +289,12 @@ def build_feed(con, uid, page=0, seed=None, area=None, per_page=24):
         cand = [i for i in np.nonzero(ok & ix.is_ht & (hs >= 5))[0] if ix.metas[i]["cats"] and ix.metas[i]["cats"][0] == c]
         if cand:
             i = max(cand, key=lambda j: hs[j] + rng.random() * 4)
-            ex.append((i, f"henüz bakmadığın bir konu: {ix.metas[i]['cat_names'][0]}"))
+            ex.append((i, f"A topic you haven't explored yet: {ix.metas[i]['cat_names'][0]}"))
     pools["explore"] = ex
     # topluluk: başkalarının aboneliklerinden yüksek puanlı
     comm = np.nonzero(ok & ~ix.is_ht & ~mine & (ix.quality >= config.COMMUNITY_THRESHOLD))[0]
     comm = comm[np.argsort(-(ix.quality[comm] + boost[comm]))]
-    pools["community"] = [(i, f"başka bir kullanıcının aboneliğinden, agent puanı {ix.quality[i]:.1f}/10")
+    pools["community"] = [(i, f"From another user's subscriptions, agent score {ix.quality[i]:.1f}/10")
                           for i in comm]
 
     # karışım (profil prefs.mix ile ağırlık değişir)
@@ -315,7 +321,7 @@ def build_feed(con, uid, page=0, seed=None, area=None, per_page=24):
         ptr[k] += 1
         used.add(ix.vids[i])
         if aversion[i] > 0.3 and best_neg[i] >= 0:
-            why += " (not: “" + str(neg_lab[best_neg[i]])[:40] + "” konusuna biraz benziyor)"
+            why += " (note: a bit like “" + str(neg_lab[best_neg[i]])[:40] + "”)"
         out.append(card_out(ix.metas[i], pool=k, why=why, later=ix.vids[i] in ctx["later"]))
     return {"items": out[page * per_page:need], "more": len(out) >= need,
             "pools": {k: POOLS[k][0] for k in pools if pools[k]}}
@@ -339,7 +345,7 @@ def search(con, uid, q, k=40):
                       for m in ix.metas], dtype=np.float32)
     total = s + bonus + ix.quality * 0.01
     top = np.argsort(-total)[:k]
-    return [card_out(ix.metas[i], why=f"Arama eşleşmesi {s[i]:.2f}") for i in top]
+    return [card_out(ix.metas[i], why=f"Search match {s[i]:.2f}") for i in top]
 
 
 def similar(vid, k=8):
@@ -348,12 +354,12 @@ def similar(vid, k=8):
     if vid in ix.related:
         for r in ix.related[vid][:6]:
             if r["vid"] in ix.row:
-                out.append(card_out(ix.metas[ix.row[r["vid"]]], why=f"{r['shared_recommenders']} ortak HN kullanıcısı önerdi"))
+                out.append(card_out(ix.metas[ix.row[r["vid"]]], why=f"Recommended by {r['shared_recommenders']} of the same HN users"))
     if vid in ix.row:
         s = ix.E @ ix.E[ix.row[vid]]
         have = {o["vid"] for o in out} | {vid}
         for i in np.argsort(-s)[1:k + 6]:
             if ix.vids[i] not in have and len(out) < k + 4 and not ix.news[i]:
-                out.append(card_out(ix.metas[i], why=f"İçerik benzerliği {s[i]:.2f}"))
+                out.append(card_out(ix.metas[i], why=f"Content similarity {s[i]:.2f}"))
                 have.add(ix.vids[i])
     return out
