@@ -125,6 +125,31 @@ jobs:
           chmod 600 "$KEY"
           echo "ASC_KEY_PATH=$KEY" >> "$GITHUB_ENV"
 
+      - name: Check API key against App Store Connect
+        if: steps.creds.outputs.ok == 'true'
+        # Fails fast with a readable message when the key, key ID or issuer ID is wrong,
+        # instead of xcodebuild's "No Accounts with App Store Connect Access".
+        run: |
+          python3 -m venv "$RUNNER_TEMP/jwtenv"
+          "$RUNNER_TEMP/jwtenv/bin/pip" install -q pyjwt cryptography
+          "$RUNNER_TEMP/jwtenv/bin/python" - <<'PY'
+          import json, os, time, urllib.error, urllib.request
+          import jwt
+          now = int(time.time())
+          tok = jwt.encode({"iss": os.environ["ASC_ISSUER_ID"].strip(), "iat": now, "exp": now + 600,
+                            "aud": "appstoreconnect-v1"}, open(os.environ["ASC_KEY_PATH"]).read(),
+                           algorithm="ES256", headers={"kid": os.environ["ASC_KEY_ID"].strip(), "typ": "JWT"})
+          req = urllib.request.Request("https://api.appstoreconnect.apple.com/v1/apps?fields[apps]=bundleId",
+                                       headers={"Authorization": "Bearer " + tok})
+          try:
+              apps = [a["attributes"]["bundleId"] for a in json.load(urllib.request.urlopen(req, timeout=30))["data"]]
+          except urllib.error.HTTPError as e:
+              raise SystemExit(f"::error::App Store Connect rejected the API key: HTTP {e.code} {e.read().decode()[:300]}")
+          print("API key OK; apps:", apps)
+          if "xyz.tunapro.hackertune" not in apps:
+              print("::warning::No App Store Connect app record for xyz.tunapro.hackertune yet (see ios/README.md).")
+          PY
+
       - name: Archive (unsigned)
         if: steps.creds.outputs.ok == 'true'
         working-directory: ios
