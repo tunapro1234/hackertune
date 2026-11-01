@@ -2,18 +2,18 @@
 #
 # simulator  every push touching ios/** (or this file) and every manual run: generates the
 #            Xcode project with XcodeGen and builds for the iOS Simulator without signing.
-# testflight manual runs (workflow_dispatch) and tags ios-v*: archives the app UNSIGNED, then
-#            `xcodebuild -exportArchive` signs it with Xcode's cloud-managed Apple Distribution
-#            certificate and uploads it to App Store Connect (destination: upload), using an
-#            App Store Connect API key. No certificates or profiles are created by hand.
-#            Archiving unsigned matters: automatic signing at archive time makes Xcode mint a new
-#            "Apple Development: Created via API" certificate on every fresh runner until the
-#            team's certificate cap is hit. The app has no entitlements file, so nothing is lost.
+# testflight manual runs (workflow_dispatch) and tags ios-v*: imports an Apple Distribution
+#            certificate and an App Store provisioning profile from secrets into a temporary
+#            keychain, archives with manual signing, exports the .ipa and uploads it with
+#            `xcrun altool` using an App Store Connect API key. Xcode's cloud signing
+#            (-exportArchive with -authenticationKey*) was dropped: on a fresh team it failed with
+#            "Cannot verify client's JWT headers" even though the same key worked against the API.
 #            Skips (green) when the secrets are missing.
 #
 # Secrets (see ios/README.md): ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8 (contents of the .p8),
-# APPLE_TEAM_ID. The API key needs the Admin role: cloud signing has to be able to create the
-# distribution certificate and the App Store provisioning profile.
+# APPLE_TEAM_ID, DIST_CERT_P12 (base64 .p12 with the distribution cert + key),
+# DIST_CERT_PASSWORD, PROFILE_B64 (base64 App Store .mobileprovision). Cert and profile can be
+# made with the API key (Admin or App Manager); both expire after a year.
 #
 # Version: MARKETING_VERSION from ios/project.yml, build number = github.run_number.
 
@@ -89,12 +89,16 @@ jobs:
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
       ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      DIST_CERT_P12: ${{ secrets.DIST_CERT_P12 }}
+      DIST_CERT_PASSWORD: ${{ secrets.DIST_CERT_PASSWORD }}
+      PROFILE_B64: ${{ secrets.PROFILE_B64 }}
     steps:
       - name: Check secrets
         id: creds
         run: |
-          if [ -z "$ASC_KEY_ID" ] || [ -z "$ASC_ISSUER_ID" ] || [ -z "$ASC_KEY_P8" ] || [ -z "$APPLE_TEAM_ID" ]; then
-            echo "::notice::ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_P8 / APPLE_TEAM_ID not set: skipping TestFlight upload."
+          if [ -z "$ASC_KEY_ID" ] || [ -z "$ASC_ISSUER_ID" ] || [ -z "$ASC_KEY_P8" ] || [ -z "$APPLE_TEAM_ID" ] \
+             || [ -z "$DIST_CERT_P12" ] || [ -z "$DIST_CERT_PASSWORD" ] || [ -z "$PROFILE_B64" ]; then
+            echo "::notice::Signing/App Store Connect secrets not set: skipping TestFlight upload (see ios/README.md)."
             echo "ok=false" >> "$GITHUB_OUTPUT"
           else
             echo "ok=true" >> "$GITHUB_OUTPUT"
@@ -150,10 +154,35 @@ jobs:
               print("::warning::No App Store Connect app record for xyz.tunapro.hackertune yet (see ios/README.md).")
           PY
 
-      - name: Archive (unsigned)
+      - name: Install signing certificate and profile
+        if: steps.creds.outputs.ok == 'true'
+        run: |
+          KC="$RUNNER_TEMP/signing.keychain-db"
+          KC_PW="$(uuidgen)"
+          security create-keychain -p "$KC_PW" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KC_PW" "$KC"
+          printf '%s' "$DIST_CERT_P12" | base64 --decode > "$RUNNER_TEMP/dist.p12"
+          security import "$RUNNER_TEMP/dist.p12" -k "$KC" -P "$DIST_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$RUNNER_TEMP/dist.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KC_PW" "$KC" >/dev/null
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$KC"
+          PROFILE="$RUNNER_TEMP/profile.mobileprovision"
+          printf '%s' "$PROFILE_B64" | base64 --decode > "$PROFILE"
+          security cms -D -i "$PROFILE" > "$RUNNER_TEMP/profile.plist"
+          UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$RUNNER_TEMP/profile.plist")
+          NAME=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$RUNNER_TEMP/profile.plist")
+          for d in "$HOME/Library/MobileDevice/Provisioning Profiles" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"; do
+            mkdir -p "$d" && cp "$PROFILE" "$d/$UUID.mobileprovision"
+          done
+          echo "PROFILE_NAME=$NAME" >> "$GITHUB_ENV"
+          echo "SIGNING_KEYCHAIN=$KC" >> "$GITHUB_ENV"
+          echo "Profile: $NAME ($UUID)"
+
+      - name: Archive (manual signing)
         if: steps.creds.outputs.ok == 'true'
         working-directory: ios
-        # No -allowProvisioningUpdates / API key here on purpose: see the header.
         run: |
           set -o pipefail
           xcodebuild archive \
@@ -164,9 +193,12 @@ jobs:
             -archivePath "$RUNNER_TEMP/HackerTune.xcarchive" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
             CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
+            OTHER_CODE_SIGN_FLAGS="--keychain $SIGNING_KEYCHAIN"
 
-      - name: Export (cloud signing) and upload to App Store Connect
+      - name: Export .ipa
         if: steps.creds.outputs.ok == 'true'
         run: |
           cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
@@ -175,9 +207,12 @@ jobs:
           <plist version="1.0">
           <dict>
             <key>method</key><string>app-store-connect</string>
-            <key>destination</key><string>upload</string>
+            <key>destination</key><string>export</string>
             <key>teamID</key><string>${APPLE_TEAM_ID}</string>
-            <key>signingStyle</key><string>automatic</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>signingCertificate</key><string>Apple Distribution</string>
+            <key>provisioningProfiles</key>
+            <dict><key>xyz.tunapro.hackertune</key><string>${PROFILE_NAME}</string></dict>
             <key>manageAppVersionAndBuildNumber</key><false/>
             <key>uploadSymbols</key><true/>
           </dict>
@@ -186,13 +221,22 @@ jobs:
           xcodebuild -exportArchive \
             -archivePath "$RUNNER_TEMP/HackerTune.xcarchive" \
             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
-            -exportPath "$RUNNER_TEMP/export" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$ASC_KEY_PATH" \
-            -authenticationKeyID "$ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+            -exportPath "$RUNNER_TEMP/export"
+          ls -la "$RUNNER_TEMP/export"
+
+      - name: Upload to App Store Connect
+        if: steps.creds.outputs.ok == 'true'
+        run: |
+          # altool finds the key as ~/.appstoreconnect/private_keys/AuthKey_<id>.p8
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          cp "$ASC_KEY_PATH" "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          xcrun altool --upload-app --type ios \
+            --file "$(ls "$RUNNER_TEMP"/export/*.ipa | head -1)" \
+            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
           echo "::notice::HackerTune build ${{ github.run_number }} uploaded. It appears in TestFlight after Apple finishes processing (usually 5-30 min)."
 
-      - name: Remove API key
+      - name: Clean up keys
         if: always() && steps.creds.outputs.ok == 'true'
-        run: rm -f "$ASC_KEY_PATH"
+        run: |
+          rm -f "$ASC_KEY_PATH" "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          [ -n "$SIGNING_KEYCHAIN" ] && security delete-keychain "$SIGNING_KEYCHAIN" || true

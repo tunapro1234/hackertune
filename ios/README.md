@@ -18,8 +18,8 @@ Layout: `project.yml` (XcodeGen spec; the `.xcodeproj` is generated in CI and no
 ## One-time setup (owner)
 
 1. **API key.** [App Store Connect → Users and Access → Integrations → App Store Connect API](https://appstoreconnect.apple.com/access/integrations/api)
-   → Team Keys → generate a key with the **Admin** role (cloud-managed signing must be able to create the
-   distribution certificate and provisioning profile). Download the `AuthKey_XXXXXXXXXX.p8` (only possible once)
+   → Team Keys → generate a key with the **Admin** role (it creates the distribution certificate and the
+   provisioning profile in step 5 and uploads builds). Download the `AuthKey_XXXXXXXXXX.p8` (only possible once)
    and note the **Key ID** and the **Issuer ID** shown above the list.
 2. **Bundle ID.** [Certificates, Identifiers & Profiles → Identifiers](https://developer.apple.com/account/resources/identifiers/list)
    → `+` → App IDs → App → Explicit Bundle ID `xyz.tunapro.hackertune`, description "HackerTune". No capabilities
@@ -36,10 +36,20 @@ Layout: `project.yml` (XcodeGen spec; the `.xcodeproj` is generated in CI and no
    gh secret set ASC_ISSUER_ID  -R tunapro1234/hackertune --body "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
    gh secret set ASC_KEY_P8     -R tunapro1234/hackertune < AuthKey_XXXXXXXXXX.p8
    gh secret set APPLE_TEAM_ID  -R tunapro1234/hackertune --body "XXXXXXXXXX"
+
+   # signing: distribution certificate + App Store profile, made with the same API key
+   python3 ios/tools/make-signing.py XXXXXXXXXX xxxxxxxx-xxxx-... AuthKey_XXXXXXXXXX.p8 ~/.secrets/hackertune
+   base64 -w0 ~/.secrets/hackertune/dist.p12 | gh secret set DIST_CERT_P12 -R tunapro1234/hackertune
+   gh secret set DIST_CERT_PASSWORD -R tunapro1234/hackertune < ~/.secrets/hackertune/dist.p12.password
+   base64 -w0 ~/.secrets/hackertune/profile.mobileprovision | gh secret set PROFILE_B64 -R tunapro1234/hackertune
    ```
 
+   The certificate and profile expire after a year; run the script again then (revoke the old certificate first).
+   Xcode's cloud signing (`-exportArchive -authenticationKey*`) is not used: on a new team it failed with
+   "Cannot verify client's JWT headers" while the same key worked against the API.
+
 6. **Build.** Actions → `ios` → Run workflow (or `gh workflow run ios.yml -R tunapro1234/hackertune --ref main`, or push
-   a tag `ios-v1.0.0`). The `testflight` job archives, signs in the cloud and uploads. Processing takes ~5-30 min.
+   a tag `ios-v1.0.0`). The `testflight` job archives with the imported certificate, exports the .ipa and uploads it with `altool`. Processing takes ~5-30 min.
 7. **Tester.** App Store Connect → the app → TestFlight → Internal Testing → `+` create a group (e.g. "Me") → add
    yourself (you must be a user on the team, which the account holder already is). Enable automatic distribution so
    new builds arrive by themselves. No export-compliance question: `ITSAppUsesNonExemptEncryption` is `NO`.
