@@ -4,6 +4,7 @@ Her havuz kendi sıralı listesini ve "neden burada" cümlesini üretir; akış,
 havuzları karıştırır. Profil: 'more' / 'less' konuları gömülür (bge-small) ve tüm adaylara benzerlik
 olarak uygulanır; beğenilen/beğenilmeyen videolar da aynı şekilde sinyal olur.
 """
+import re
 import json
 import random
 import threading
@@ -337,15 +338,30 @@ def card_out(m, pool=None, why=None, later=False):
 
 
 def search(con, uid, q, k=40):
+    """Catalog search. Each item gets `strong`: a text match (whole query, or every word, in the title/channel) or a high
+    embedding score. Weak hits are only loosely related (names like "artem kirsanov" land on random talks at ~0.6)."""
     ix = index()
     qv = _topic_vec(q.strip()[:300])
     s = ix.E @ qv
     ql = q.lower().strip()
-    bonus = np.array([0.15 if ql and (ql in (m["title"] or "").lower() or ql in (m["channel"] or "").lower()) else 0.0
-                      for m in ix.metas], dtype=np.float32)
-    total = s + bonus + ix.quality * 0.01
+    words = [w for w in re.findall(r"\w+", ql) if len(w) > 1]
+
+    def text_hit(m):
+        hay = f"{m['title'] or ''} {m['channel'] or ''}".lower()
+        return bool(ql) and (ql in hay or (words and all(w in hay for w in words)))
+
+    hits = np.array([text_hit(m) for m in ix.metas])
+    total = s + hits * 0.15 + ix.quality * 0.01
     top = np.argsort(-total)[:k]
-    return [card_out(ix.metas[i], why=f"Search match {s[i]:.2f}") for i in top]
+    return [card_out(ix.metas[i], why=f"Search match {s[i]:.2f}") | {"strong": bool(hits[i] or s[i] >= 0.70)} for i in top]
+
+
+def similar_text(text, k=10, exclude=()):
+    """Catalog videos close to a free text (title of a video outside the catalog)."""
+    ix = index()
+    s = ix.E @ _topic_vec(text[:300])
+    return [card_out(ix.metas[i], why=f"Similar on HackerTune {s[i]:.2f}") for i in np.argsort(-s)[:k + len(exclude)]
+            if ix.vids[i] not in exclude and not ix.news[i]][:k]
 
 
 def similar(vid, k=8):

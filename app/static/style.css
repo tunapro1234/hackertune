@@ -375,3 +375,7 @@ body.mini-on #toast { bottom: 120px; }
   .mini #miniNext { display: none; }
 }
 @media (hover: hover) and (pointer: fine) { .autobg { display: none !important; } }
+
+/* search: catalog + YouTube sections */
+.srch section + section:not([hidden]) { margin-top: 40px; }
+.srch .shelf-hd p { font-size: 13px; }

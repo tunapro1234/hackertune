@@ -79,7 +79,14 @@ document.addEventListener("click", (e) => {
   if (a && !e.metaKey && !e.ctrlKey && !e.shiftKey && a.origin === location.origin) { e.preventDefault(); setMenu(false); go(a.getAttribute("href")); }
 });
 window.addEventListener("popstate", route);
-$("#searchForm").addEventListener("submit", (e) => { e.preventDefault(); const q = $("#q").value.trim(); if (q) { $("#q").blur(); go(`/search?q=${encodeURIComponent(q)}`); } });
+const YT_LINK = /(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/;
+$("#searchForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const q = $("#q").value.trim(); if (!q) return;
+  $("#q").blur();
+  const m = q.match(YT_LINK);  // a pasted YouTube link opens the video directly
+  go(m ? `/v/${m[1]}` : `/search?q=${encodeURIComponent(q)}`);
+});
 
 let cleanup = null;
 async function route() {
@@ -425,10 +432,24 @@ async function pageShowcase() {
 async function pageSearch(q) {
   $("#q").value = q;
   document.title = `${q} - ${TITLE}`;
-  main.innerHTML = `<div class="grid" id="grid"></div>`;
-  const d = await api(`/api/search?q=${encodeURIComponent(q)}`);
-  $("#grid").innerHTML = d.items.map((it) => cardHTML(it)).join("") || `<div class="empty">No results.</div>`;
-  bindCards($("#grid"));
+  main.innerHTML = `<div class="srch"><section id="srCat" hidden></section>
+    <section><div class="shelf-hd"><div><span class="kind">YouTube</span></div></div>
+      <div id="srYt"><div class="sc-wait"><div class="spinner"></div>Searching YouTube</div></div></section>
+    <section id="srLoose" hidden></section></div>`;
+  const sec = (title, sub, items) => `<div class="shelf-hd"><div><span class="kind">${title}</span>${sub ? `<p>${sub}</p>` : ""}</div></div>
+    <div class="grid">${items.map((it) => cardHTML(it)).join("")}</div>`;
+  bindCards(main.firstElementChild);
+  const [cat, ytr] = await Promise.allSettled([api(`/api/search?q=${encodeURIComponent(q)}`), api(`/api/search/youtube?q=${encodeURIComponent(q)}`)]);
+  if (!$("#srYt")) return;  // navigated away
+  const items = cat.status === "fulfilled" ? cat.value.items : [];
+  const strong = items.filter((i) => i.strong), loose = items.filter((i) => !i.strong);
+  const ytItems = ytr.status === "fulfilled" ? ytr.value.items : null;
+  if (strong.length) { $("#srCat").hidden = false; $("#srCat").innerHTML = sec("On HackerTune", "From the curated catalog", strong.slice(0, 16)); }
+  $("#srYt").innerHTML = ytItems == null ? `<div class="empty">YouTube search failed: ${esc(ytr.reason?.message || "error")}</div>`
+    : ytItems.length ? `<div class="grid">${ytItems.map((it) => cardHTML(it)).join("")}</div>` : `<div class="empty">Nothing on YouTube for that.</div>`;
+  if (!strong.length && (ytItems == null || !ytItems.length) && loose.length) {
+    $("#srLoose").hidden = false; $("#srLoose").innerHTML = sec("Loosely related on HackerTune", "", loose.slice(0, 12));
+  }
 }
 
 async function pageCats() {

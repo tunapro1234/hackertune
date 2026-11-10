@@ -122,6 +122,33 @@ def list_channel(ref, limit):
     return {"channel_id": cid, "name": name, "handle": handle, "videos": vids}
 
 
+_search_cache = {}
+
+
+def youtube_search(q, n=24):
+    """YouTube search via yt-dlp (flat, no per-video requests). Shorts (<= 60 s) and live streams are dropped.
+    Cached for 15 minutes per query."""
+    key = q.strip().lower()
+    hit = _search_cache.get(key)
+    if hit and time.time() - hit[0] < 900:
+        return hit[1]
+    d = ytdlp_json(f"ytsearch{n}:{q.strip()}", ["--flat-playlist"], timeout=60)
+    out = []
+    for e in d.get("entries") or []:
+        vid = e.get("id")
+        if not vid or not VID_RE.match(vid) or e.get("live_status") in ("is_live", "is_upcoming"):
+            continue
+        dur = int(e["duration"]) if e.get("duration") else None
+        if dur is not None and dur <= 60 or "/shorts/" in (e.get("url") or ""):
+            continue
+        out.append({"vid": vid, "title": e.get("title"), "channel": e.get("channel") or e.get("uploader"),
+                    "channel_id": e.get("channel_id"), "duration": dur, "views": e.get("view_count"), "source": "yt"})
+    if len(_search_cache) > 300:
+        _search_cache.clear()
+    _search_cache[key] = (time.time(), out)
+    return out
+
+
 # ---------- video meta + transcript ----------
 
 def _cache_path(vid, kind):

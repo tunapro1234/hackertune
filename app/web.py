@@ -142,6 +142,38 @@ async def search(request: Request, q: str):
     return {"items": await asyncio.to_thread(reco.search, con, uid, q[:200])}
 
 
+@app.get("/api/search/youtube")
+async def search_youtube(request: Request, q: str):
+    con, uid = con_user(request)
+    if not q.strip():
+        return {"items": []}
+    try:
+        items = await asyncio.to_thread(yt.youtube_search, q[:200])
+    except Exception as e:
+        raise HTTPException(502, f"YouTube search failed: {str(e)[:200]}")
+    known = {r["vid"]: r for r in con.execute(
+        f"SELECT vid, source, quality FROM videos WHERE vid IN ({','.join('?' * len(items))})", [i["vid"] for i in items])} if items else {}
+    for i in items:  # already in the catalog: say so (same card, but with its score)
+        k = known.get(i["vid"])
+        if k and k["source"] in ("ht", "sub"):
+            i["source"], i["quality"] = k["source"], k["quality"]
+    return {"items": items}
+
+
+def _add_outside_video(con, vid):
+    """A video opened from YouTube search or a pasted link: fetch its metadata once and keep it as source='search'
+    (outside the feed and the catalog index; it gets history, chat and background audio like any other video)."""
+    m = yt.video_meta(vid)
+    if not m.get("title"):
+        raise RuntimeError("no metadata")
+    now = time.time()
+    with db.tx(con):
+        con.execute("""INSERT OR IGNORE INTO videos(vid,source,title,channel,channel_id,duration,views,upload_date,status,
+                       attempts,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,0,?,?)""",
+                    (vid, "search", m["title"], m.get("channel"), m.get("channel_id"), m.get("duration"), m.get("views"),
+                     m.get("upload_date"), "search", now, now))
+
+
 @app.get("/api/video/{vid}")
 async def video(request: Request, vid: str):
     if not yt.VID_RE.match(vid):
@@ -149,7 +181,11 @@ async def video(request: Request, vid: str):
     con, uid = con_user(request)
     r = con.execute("SELECT * FROM videos WHERE vid=?", (vid,)).fetchone()
     if not r:
-        raise HTTPException(404, "This video is not in the catalog")
+        try:
+            await asyncio.to_thread(_add_outside_video, con, vid)
+        except Exception:
+            raise HTTPException(404, "Couldn't load this video from YouTube (private, removed or region-locked?)")
+        r = con.execute("SELECT * FROM videos WHERE vid=?", (vid,)).fetchone()
     ments = [dict(m) for m in con.execute(
         """SELECT hn_comment_id, author, month, story_title, stance, why, quote, text FROM mentions WHERE vid=?
            ORDER BY CASE stance WHEN 'strong_rec' THEN 0 WHEN 'rec' THEN 1 WHEN 'critical' THEN 2 ELSE 3 END, month DESC""",
@@ -162,7 +198,8 @@ async def video(request: Request, vid: str):
         "duration": r["duration"], "views": r["views"], "upload_date": r["upload_date"], "status": r["status"],
         "quality": r["quality"], "card": db.jload(r["card"], {}), "ht": db.jload(r["ht"], None),
         "eval": db.jload(r["eval"], None), "triage": db.jload(r["triage"], None), "mentions": ments,
-        "related": await asyncio.to_thread(reco.similar, vid),
+        "related": (await asyncio.to_thread(reco.similar, vid)) or (await asyncio.to_thread(
+            reco.similar_text, f"{r['title'] or ''} {r['channel'] or ''}", 10, (vid,))),
         "state": dict(st) if st else {}, "chat": chat.messages(con, cid) if cid else [],
     }
 

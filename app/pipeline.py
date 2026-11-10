@@ -57,6 +57,14 @@ def _insert_videos(con, info):
                             (info["channel_id"], v["duration"], v["views"], v["vid"]))
             elif r["source"] == "sub":
                 con.execute("UPDATE videos SET views=COALESCE(?,views), pos=? WHERE vid=?", (v["views"], v["pos"], v["vid"]))
+            elif r["source"] == "search":  # opened from search earlier, now its channel is a subscription: evaluate it
+                short = v["duration"] is not None and v["duration"] < config.MIN_DURATION_S
+                con.execute("""UPDATE videos SET source='sub', status=?, triage=?, channel_id=COALESCE(channel_id,?), pos=?,
+                               views=COALESCE(?,views), updated_at=? WHERE vid=?""",
+                            ("triage_skip" if short else "new",
+                             json.dumps({"deep": False, "reason": SHORT_REASON, "model": "rule"}) if short else None,
+                             info["channel_id"], v["pos"], v["views"], now, v["vid"]))
+                new += 0 if short else 1
             continue
         short = v["duration"] is not None and v["duration"] < config.MIN_DURATION_S
         status = "triage_skip" if short else "new"

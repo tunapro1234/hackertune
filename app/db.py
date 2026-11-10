@@ -10,7 +10,7 @@ SCHEMA = """
 PRAGMA journal_mode=WAL;
 CREATE TABLE IF NOT EXISTS videos (
   vid TEXT PRIMARY KEY,
-  source TEXT NOT NULL,              -- 'ht' (HackerTube verisi) | 'sub' (abonelikten gelen)
+  source TEXT NOT NULL,              -- ht (HackerTube) | sub (subscriptions) | pick (curator) | search (opened from search)
   title TEXT, channel TEXT, channel_id TEXT,
   duration INTEGER, views INTEGER, upload_date TEXT, lang TEXT,
   card TEXT,                         -- JSON: summary, why, content_type, level, shelf_life, primary_topic, tags, categories
