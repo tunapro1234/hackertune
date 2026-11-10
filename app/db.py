@@ -92,6 +92,10 @@ CREATE TABLE IF NOT EXISTS showcase (        -- vitrin: küratör agent'ının k
   generated_at REAL, profile_version INTEGER, shelves TEXT, status TEXT, job_id INTEGER
 );
 CREATE INDEX IF NOT EXISTS showcase_uid ON showcase(uid, id);
+CREATE TABLE IF NOT EXISTS channel_reviews (  -- curator-written channel review, per user (each one a new row)
+  id INTEGER PRIMARY KEY AUTOINCREMENT, uid TEXT, channel_id TEXT, created_at REAL, review TEXT, job_id INTEGER
+);
+CREATE INDEX IF NOT EXISTS channel_reviews_uc ON channel_reviews(uid, channel_id, id);
 """
 
 

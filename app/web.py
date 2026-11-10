@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 import httpx
 
-from . import agents, chat, config, db, llm, reco, showcase, tools, yt
+from . import agents, channel, chat, config, db, llm, reco, showcase, tools, yt
 from .pipeline import get_profile
 
 db.init()
@@ -82,7 +82,8 @@ INDEX = config.STATIC / "index.html"
 @app.get("/kategoriler")
 @app.get("/ara")
 @app.get("/v/{vid}")
-async def spa(request: Request, vid: str = None):
+@app.get("/c/{ref:path}")
+async def spa(request: Request, vid: str = None, ref: str = None):
     return FileResponse(INDEX, headers={"Cache-Control": "no-cache"})
 
 
@@ -423,6 +424,43 @@ async def import_status(request: Request, iid: int):
     d = dict(r)
     d["log"] = db.jload(d["log"], [])
     return d
+
+
+@app.get("/api/channel/{cid}/review")
+async def channel_review_get(request: Request, cid: str):
+    con, uid = con_user(request)
+    return channel.review_state(con, uid, cid, None)
+
+
+@app.get("/api/channel/{ref:path}")
+async def channel_page(request: Request, ref: str):
+    con, uid = con_user(request)
+    ref = ref.strip()[:120]
+    if not ref:
+        raise HTTPException(404)
+    try:
+        return await asyncio.to_thread(channel.page, con, uid, ref)
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        raise HTTPException(502, f"Couldn't load this channel from YouTube: {str(e)[:200]}")
+
+
+@app.post("/api/channel/{cid}/subscribe")
+async def channel_subscribe(request: Request, cid: str):
+    con, uid = con_user(request)
+    try:
+        return await asyncio.to_thread(channel.subscribe, con, uid, cid)
+    except LookupError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/channel/{cid}/review")
+async def channel_review_post(request: Request, cid: str):
+    con, uid = con_user(request)
+    if not yt.CID_RE.fullmatch(cid):
+        raise HTTPException(400, "bad channel id")
+    return await asyncio.to_thread(channel.request_review, con, uid, cid)
 
 
 @app.delete("/api/subs/{cid}")

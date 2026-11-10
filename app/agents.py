@@ -10,23 +10,25 @@ import re
 import subprocess
 import time
 
-from . import config, db, english, pipeline, showcase, tools
+from . import channel, config, db, english, pipeline, showcase, tools
 
 BP = os.environ.get("YT_BP_BIN", "/usr/local/bin/bp")
 YTCTL = str(config.ROOT / "bin" / "ytctl")
 
 # ad -> yapabildiği iş türleri. yt.env: YT_AGENTS="youtube-eval-1:deep,...,youtube-curator:curate"
 DEFAULT_AGENTS = ("youtube-eval-1:deep,youtube-eval-2:deep,youtube-triage:triage+fit+translate,"
-                  "youtube-curator:curate")
+                  "youtube-curator:chanrev+curate")
 AGENTS = {}
 for part in (os.environ.get("YT_AGENTS") or DEFAULT_AGENTS).split(","):
     if ":" in part:
         name, kinds = part.split(":", 1)
         AGENTS[name.strip()] = set(kinds.strip().split("+"))
 
-TIMEOUT = {"deep": 25 * 60, "triage": 12 * 60, "fit": 12 * 60, "translate": 12 * 60, "curate": 45 * 60}
+TIMEOUT = {"deep": 25 * 60, "triage": 12 * 60, "fit": 12 * 60, "translate": 12 * 60, "curate": 45 * 60,
+           "chanrev": 20 * 60}
 KIND_NAME = {"deep": "deep evaluation", "triage": "triage", "fit": "personal fit scoring",
-             "translate": "rewrite stored texts in English", "curate": "showcase curation"}
+             "translate": "rewrite stored texts in English", "curate": "showcase curation",
+             "chanrev": "channel review"}
 LANG_LINE = ("LANGUAGE: from now on write ALL text you produce (cards, verdicts, reasoning, highlights, reasons, "
              "titles, whys) in English, even if the video or older examples are in Turkish or another language.\n")
 
@@ -132,12 +134,14 @@ def claim(con, agent):
         r = con.execute("SELECT id FROM jobs WHERE status='sent' AND agent=? ORDER BY id LIMIT 1", (agent,)).fetchone()
         if r:
             return r["id"]
-        if "curate" in AGENTS[agent]:  # vitrin işleri worker/web tarafından kuyruğa konur (status='queued')
-            q = con.execute("""SELECT id FROM jobs WHERE kind='curate' AND status='queued'
-                               ORDER BY COALESCE(json_extract(payload,'$.prio'),1), id LIMIT 1""").fetchone()
+        # vitrin ve kanal incelemesi işleri web/worker tarafından kuyruğa konur (status='queued'); inceleme önce
+        # (kullanıcı sayfada bekliyor)
+        for qk in [k for k in ("chanrev", "curate") if k in AGENTS[agent]]:
+            q = con.execute("""SELECT id FROM jobs WHERE kind=? AND status='queued'
+                               ORDER BY COALESCE(json_extract(payload,'$.prio'),1), id LIMIT 1""", (qk,)).fetchone()
             if q:
                 con.execute("UPDATE jobs SET status='sent', agent=?, sent_at=? WHERE id=?", (agent, time.time(), q["id"]))
-                db.event(con, "curate", None, f"job #{q['id']} → {agent} ({KIND_NAME['curate']})")
+                db.event(con, qk, None, f"job #{q['id']} → {agent} ({KIND_NAME[qk]})")
                 return q["id"]
         mk = _make_job(con, agent, AGENTS[agent])
         if not mk:
@@ -212,6 +216,8 @@ def job_text(con, j):
     jid, kind, p = j["id"], j["kind"], j["payload"]
     if kind == "curate" and j["status"] == "sent":
         return showcase.job_text(con, j)
+    if kind == "chanrev" and j["status"] == "sent":
+        return channel.job_text(con, j)
     head = f"JOB #{jid} — {KIND_NAME[kind]}  (status: {j['status']})\n"
     if j["status"] != "sent":
         return head + "This job is no longer open; do nothing."
@@ -279,6 +285,8 @@ def submit(con, j, data):
         return {"ok": True, "message": "Saved. Job done; run ytctl next again."}
     if kind == "curate":
         return showcase.submit(con, j, data)
+    if kind == "chanrev":
+        return channel.submit(con, j, data)
     if not isinstance(data, list):
         return {"ok": False, "errors": ["expected a JSON array"]}
     if kind == "translate":

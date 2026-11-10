@@ -18,6 +18,10 @@ audio that keeps playing with the phone's screen off. The UI is in English; this
 - **Video sohbeti:** transcript'i, kartı ve HN yorumlarını okuyan sohbet; zaman damgalarına tıklayınca video oraya atlar.
 - **Vitrin (Showcase):** kişisel küratör agent'ı (`youtube-curator`) geçmişine, beğenilerine ve profiline bakıp raflar kurar:
   seçkiler, sırayla izlenecek seriler ve hiç aramayacağın ama bayılacağın uzak konulardan sürprizler (katalog dışından da).
+- **Arama ve kanal sayfaları:** arama önce katalogda, sonra YouTube'da arar; yapıştırılan YouTube linki ya da aramadan
+  açılan herhangi bir video oynar. Kanal adına tıklayınca `/c/<kanal>` açılır: videolar (en yeni / popüler / HN seçkisi),
+  HN'de kaç kez önerildiği, tek tıkla abonelik. Küratör ilk ziyarette kanala sana özel bir **inceleme** yazar (uyum puanı,
+  nereden başlanır, iyi yanları / dikkat, abone olmaya değer mi, benzer kanallar); birkaç video örnekleyip HN'e bakarak.
 - **Konuşarak yönlendirilen algoritma:** "daha az siyaset, daha çok donanım" dersin, profilin açıkça güncellenir.
 - **Ekran kapalıyken dinleme:** telefonda ses kendi `<audio>` oynatıcısından gelir, video sessiz ve senkron akar;
   telefonu kilitlesen de ses sürer (iPhone'da gerçek cihazda doğrulandı). Kilit ekranı kontrolleri Media Session ile.
@@ -32,7 +36,7 @@ nginx ── yt-web  (FastAPI, app/web.py)      SPA (app/static), API, ses vekil
          yt-worker (app/worker.py)           içe aktarma, kanal tarama, embedding, iş kuyruğu (jobs)
              ▲ ytctl next / submit
          Claude Code agent'ları (bp ile tmux'ta): youtube-eval-1/2 (derin), youtube-triage (ön eleme + uyum + çeviri),
-                                             youtube-curator (vitrin)
+                                             youtube-curator (vitrin + kanal incelemesi)
 ```
 
 - **Çekme modeli:** agent'lar `bin/ytctl next <ad>` ile kuyruktan iş alır, `ytctl meta|transcript|hn|similar|channel`

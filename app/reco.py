@@ -329,7 +329,8 @@ def build_feed(con, uid, page=0, seed=None, area=None, per_page=24):
 
 
 def card_out(m, pool=None, why=None, later=False):
-    return {"vid": m["vid"], "title": m["title"], "channel": m["channel"], "duration": m["duration"],
+    return {"vid": m["vid"], "title": m["title"], "channel": m["channel"], "channel_id": m.get("channel_id"),
+            "duration": m["duration"],
             "quality": round(m["quality"], 1) if m["quality"] is not None else None, "source": m["source"],
             "summary": m["summary"], "type": m["content_type"], "topic": m["topic"],
             "pool": pool, "pool_name": POOLS.get(pool, ("",))[0] if pool else None, "why": why,

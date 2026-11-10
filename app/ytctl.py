@@ -3,12 +3,14 @@ import json
 import sys
 import time
 
-from . import agents, db, showcase, tools
+from . import agents, channel, db, showcase, tools
 
 USAGE = """ytctl next <agent-name> | cron-set <agent-name> | job <N> | submit <N> [file] (default stdin) | fail <N> <reason>
   deep jobs:    meta <N> | transcript <N> [offset] [max_chars] | hn <N> [query] | similar <N> [text] | channel <N>
   curate jobs:  user <N> | topics <N> | search <N> <query> | similar <N> <vid|text> | top <N> [area|category]
-                | ytsearch <N> <query> | ytplaylists <N> <query> | playlist <N> <playlist-id> | inspect <N> <vid>"""
+                | ytsearch <N> <query> | ytplaylists <N> <query> | playlist <N> <playlist-id> | inspect <N> <vid>
+  chanrev jobs: user <N> | channel <N> | transcript <N> <vid> [offset] | inspect <N> <vid> | hn <N> | ytsearch <N> <query>"""
+CHANREV_CMDS = ("user", "channel", "transcript", "inspect", "hn", "ytsearch")
 CURATE_CMDS = ("user", "topics", "search", "similar", "top", "ytsearch", "ytplaylists", "playlist", "inspect")
 
 
@@ -82,6 +84,17 @@ def main(argv):
     try:
         if j["kind"] == "curate" and cmd in CURATE_CMDS:
             return curate_cmd(con, j, cmd, rest)
+        if j["kind"] == "chanrev" and cmd in CHANREV_CMDS:
+            arg = " ".join(rest).strip().strip('"').strip("'").strip()[:200]
+            res = channel.tool(con, j, cmd, arg)
+            agents.record_call(con, jid, cmd, "error" not in res)
+            if cmd == "transcript" and res.get("available"):
+                print(f"[transcript {res['offset']}-{res['offset'] + len(res['text'])} / {res['total_chars']} chars; "
+                      f"next_offset={res['next_offset']}]")
+                print(res["text"])
+                return 0
+            print(json.dumps(res, ensure_ascii=False, separators=(",", ":")))
+            return 0
         if cmd in ("meta", "transcript", "hn", "similar", "channel"):
             if j["kind"] != "deep":
                 out("this command only exists for deep evaluation jobs")

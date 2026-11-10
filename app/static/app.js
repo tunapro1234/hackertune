@@ -103,6 +103,7 @@ async function route() {
     if (p === "/") await pageFeed(qs.get("area"));
     else if (p === "/showcase") await pageShowcase();
     else if (p.startsWith("/v/")) await pageWatch(p.slice(3), Number(qs.get("t")) || null);
+    else if (p.startsWith("/c/")) await pageChannel(decodeURIComponent(p.slice(3)), qs.get("sort") || "latest");
     else if (p === "/search") await pageSearch(qs.get("q") || "");
     else if (p === "/subscriptions") await pageSubs();
     else if (p === "/algorithm") await pageAlgo();
@@ -125,6 +126,8 @@ function metaLine(it) {
   else if (it.hn_first) a.push(`on HN since ${it.hn_first}`);
   return a.join(" · ");
 }
+const chanHref = (it) => it.channel_id ? `/c/${it.channel_id}` : it.channel ? `/c/name:${encodeURIComponent(it.channel)}` : "";
+const chanLink = (it, cls = "chan") => it.channel ? `<a class="${cls}" href="${chanHref(it)}" data-link>${esc(it.channel)}</a>` : "";
 function cardHTML(it, o = {}) {
   const prog = it.pos && it.dur ? `<span class="prog"><i style="width:${Math.min(100, (100 * it.pos) / it.dur)}%"></i></span>` : "";
   const why = [it.pool_name, it.why].filter(Boolean).join(": ");
@@ -132,7 +135,7 @@ function cardHTML(it, o = {}) {
     <a class="thumb" href="/v/${it.vid}" data-link>${thumb(it.vid)}${o.num ? `<span class="num">${o.num}</span>` : ""}${it.duration ? `<span class="dur">${fmtDur(it.duration)}</span>` : ""}${prog}</a>
     <div class="info">
       <div><a class="title" href="/v/${it.vid}" data-link title="${esc(it.title)}">${esc(it.title)}</a>
-        <div class="meta"><div>${esc(it.channel || "")}</div><div title="${esc(why)}">${it.source === "sub" ? `<span class="badge sub" title="From your subscriptions; agent score">${(it.quality ?? 0).toFixed(1)}</span>` : ""}${esc(metaLine(it))}</div></div>
+        <div class="meta"><div>${o.noChan ? "" : chanLink(it)}</div><div title="${esc(why)}">${it.source === "sub" ? `<span class="badge sub" title="From your subscriptions; agent score">${(it.quality ?? 0).toFixed(1)}</span>` : ""}${esc(metaLine(it))}</div></div>
         ${o.why && it.why ? `<div class="why">${esc(it.why)}</div>` : ""}</div>
       <button class="menu-btn" data-menu aria-label="Options">${I.dots}</button>
     </div>
@@ -452,6 +455,110 @@ async function pageSearch(q) {
   }
 }
 
+async function pageChannel(ref, sort) {
+  main.innerHTML = `<div class="chpage"><div class="sc-wait"><div class="spinner"></div>Reading the channel</div></div>`;
+  const d = await api(`/api/channel/${encodeURIComponent(ref)}`);
+  const ch = d.channel, cid = ch.channel_id, st = d.stats;
+  if (ref !== cid) history.replaceState({}, "", `/c/${cid}${location.search}`);
+  document.title = `${ch.name} - ${TITLE}`;
+  const chips = [
+    ch.followers ? `${fmtViews(ch.followers).replace(/ views?$/, "")} subscribers` : "",
+    st.listed ? plural(st.listed, "video") + (st.listed >= 200 ? "+" : "") : "",
+    st.hn_videos ? `<span class="hnchip">${plural(st.hn_videos, "video")} recommended on HN</span>` : "",
+    st.evaluated ? `agent avg ${st.avg_score}/10 over ${plural(st.evaluated, "video")}` : "",
+  ].filter(Boolean);
+  const SORTS = [["latest", "Latest"], ["popular", "Popular"], ["hn", "HN picks"]].filter(([k]) => k !== "hn" || st.hn_videos || st.evaluated);
+  if (!SORTS.some(([k]) => k === sort)) sort = "latest";
+  const sortItems = (s) => {
+    const a = [...d.items];
+    if (s === "popular") return a.sort((x, y) => (y.views || 0) - (x.views || 0));
+    if (s === "hn") return a.filter((x) => x.hn || x.source === "sub").sort((x, y) => (y.recs || 0) - (x.recs || 0) || (y.quality || 0) - (x.quality || 0));
+    return a.sort((x, y) => x.pos - y.pos);
+  };
+  main.innerHTML = `<div class="chpage">
+    <header class="ch-hd">
+      ${ch.avatar ? `<img class="ch-av" src="${esc(ch.avatar)}" alt="" referrerpolicy="no-referrer">` : `<div class="ch-av ph">${esc((ch.name || "?")[0])}</div>`}
+      <div class="ch-id"><h1>${esc(ch.name)}</h1>
+        <div class="ch-sub">${[ch.handle ? esc(ch.handle) : "", ...chips].filter(Boolean).join(" · ")}</div>
+        ${ch.description ? `<p class="ch-desc" id="chDesc" title="Show more">${esc(ch.description)}</p>` : ""}</div>
+      <div class="ch-act"><button class="btn ${d.subscribed ? "" : "accent"}" id="subBtn">${d.subscribed ? "Subscribed" : "Subscribe"}</button>
+        <a class="btn" href="https://www.youtube.com/channel/${cid}" target="_blank" rel="noopener">${I.yt}YouTube</a></div>
+    </header>
+    <section class="panel review" id="review"></section>
+    <div class="bar-top"><nav class="seg" aria-label="Sort">${SORTS.map(([k, n]) => `<a href="?sort=${k}" data-sort="${k}" class="${k === sort ? "on" : ""}">${n}</a>`).join("")}</nav></div>
+    <div class="grid" id="grid"></div></div>`;
+  const draw = () => {
+    const items = sortItems(sort);
+    $("#grid").innerHTML = items.map((it) => cardHTML(it, { noChan: true })).join("") || `<div class="empty">No videos here.</div>`;
+  };
+  main.querySelector(".seg").addEventListener("click", (e) => {
+    const a = e.target.closest("[data-sort]"); if (!a) return;
+    e.preventDefault(); sort = a.dataset.sort;
+    $$(".chpage .seg a").forEach((x) => x.classList.toggle("on", x === a));
+    history.replaceState({}, "", `/c/${cid}?sort=${sort}`);
+    draw();
+  });
+  $("#chDesc")?.addEventListener("click", (e) => e.currentTarget.classList.toggle("open"));
+  $("#subBtn").onclick = async (e) => {
+    const b = e.currentTarget; b.disabled = true;
+    try {
+      if (d.subscribed) { await api(`/api/subs/${cid}`, { method: "DELETE" }); d.subscribed = false; toast("Unsubscribed"); }
+      else {
+        const r = await api(`/api/channel/${cid}/subscribe`, { method: "POST" }); d.subscribed = true;
+        toast(r.new ? `Subscribed · ${plural(r.new, "new video")} going to your agents` : "Subscribed");
+      }
+      b.textContent = d.subscribed ? "Subscribed" : "Subscribe"; b.classList.toggle("accent", !d.subscribed);
+    } catch (err) { toast(err.message); }
+    b.disabled = false;
+  };
+
+  const byVid = Object.fromEntries(d.items.map((x) => [x.vid, x]));
+  let timer = null;
+  const poll = (r) => { clearTimeout(timer); timer = setTimeout(async () => renderReview(await api(`/api/channel/${cid}/review`).catch(() => r)), 15000); };
+  const vlink = (vid, why) => {
+    const x = byVid[vid] || {};
+    return `<a class="rv-v" href="/v/${vid}" data-link><span class="rv-th">${thumb(vid)}</span><span class="rv-vt"><b>${esc(x.title || vid)}</b>${why ? `<span>${esc(why)}</span>` : ""}</span></a>`;
+  };
+  const li = (a) => (a || []).map((x) => `<li>${esc(x)}</li>`).join("");
+  function renderReview(r) {
+    const el = $("#review"); if (!el) return;
+    if (r.status === "pending" && !r.review) {
+      el.innerHTML = `<div class="rv-wait"><div class="spinner"></div><div><b>Your curator is reviewing this channel</b><span>${r.started ? "Sampling a few videos and reading what HN said. Usually 2–5 minutes." : "Queued; it starts in a moment."} Keep browsing, it appears here.</span></div></div>`;
+      poll(r);
+      return;
+    }
+    if (!r.review) {
+      el.innerHTML = `<div class="rv-wait"><div><b>No review yet</b><span>Ask your curator what this channel is and whether it suits you.</span></div><button class="btn accent small" id="rvBtn">Review this channel</button></div>`;
+    } else {
+      const v = r.review, fit = v.fit || {}, sc = Number(fit.score ?? 0);
+      const subTxt = { yes: "Worth subscribing", maybe: "Maybe subscribe", no: "No need to subscribe" }[v.subscribe] || "";
+      const when = r.created_at ? `Written ${ago(r.created_at)}` : "";
+      el.innerHTML = `<div class="rv-top"><span class="kind">${I.star}Curator's review</span>
+          <span class="rv-fit ${sc >= 7 ? "hi" : sc >= 4 ? "mid" : "lo"}">Fit ${fit.score ?? "?"}/10</span>
+          <span class="rv-sub ${esc(v.subscribe || "")}">${subTxt}</span></div>
+        <p class="rv-sum">${esc(v.summary || "")}</p>
+        <p class="rv-style">${esc(v.style || "")}</p>
+        <p class="rv-fitv"><b>For you:</b> ${esc(fit.verdict || "")}${v.subscribe_why ? ` <span class="muted">${esc(v.subscribe_why)}</span>` : ""}</p>
+        <div class="rv-cols"><div><h3>Good</h3><ul>${li(v.strengths)}</ul></div>${(v.caveats || []).length ? `<div><h3>Watch out</h3><ul>${li(v.caveats)}</ul></div>` : ""}</div>
+        ${(v.start_here || []).length ? `<h3>Start here</h3><div class="rv-list">${v.start_here.map((s) => vlink(s.vid, s.why)).join("")}</div>` : ""}
+        ${(v.series || []).map((s) => `<h3>Series · ${esc(s.title)}</h3><div class="rv-list">${s.vids.map((x) => vlink(x)).join("")}</div>`).join("")}
+        ${(v.similar_channels || []).length ? `<h3>Similar channels</h3><ul class="rv-sim">${v.similar_channels.map((c) => `<li><a href="/c/name:${encodeURIComponent(c.name)}" data-link>${esc(c.name)}</a> <span class="muted">${esc(c.why)}</span></li>`).join("")}</ul>` : ""}
+        <div class="rv-foot">${when}${r.status === "pending" ? " · a fresh review is on its way" : r.can_regenerate ? ` · <button class="linkbtn" id="rvBtn">Write a fresh one</button>` : ""}</div>`;
+      if (r.status === "pending") poll(r);
+    }
+    $("#rvBtn")?.addEventListener("click", async () => {
+      const x = await api(`/api/channel/${cid}/review`, { method: "POST" }).catch((e) => ({ error: e.message }));
+      if (x.error) toast(x.error);
+      renderReview(await api(`/api/channel/${cid}/review`));
+    });
+  }
+  renderReview(d.review);
+  draw();
+  bindCards($("#grid"));
+  bindCards($("#review"));
+  cleanup = () => clearTimeout(timer);
+}
+
 async function pageCats() {
   if (!state.areas) state.areas = await api("/api/areas").catch(() => []);
   document.title = `Topics - ${TITLE}`;
@@ -557,7 +664,7 @@ async function pageWatch(vid, tParam) {
       <div class="wbody">
       <h1 class="wtitle">${esc(v.title)}</h1>
       <div class="wrow">
-        <div class="wchan">${esc(v.channel || "")}<small>${[v.views ? fmtViews(v.views) : "", v.upload_date ? dateAgo(v.upload_date) : "", v.duration ? fmtDur(v.duration) : ""].filter(Boolean).join(" · ")}</small></div>
+        <div class="wchan">${chanLink(v)}<small>${[v.views ? fmtViews(v.views) : "", v.upload_date ? dateAgo(v.upload_date) : "", v.duration ? fmtDur(v.duration) : ""].filter(Boolean).join(" · ")}</small></div>
         <div class="actions">
           <button class="btn accent" id="bgBtn" title="Keeps playing with the screen off">${I.listen}<span>Listen in background</span></button>
           <button class="btn ${st.rating > 0 ? "on" : ""}" data-r="1" aria-label="Like">${I.up}<span class="lbl-long">Like</span></button>
